@@ -34,7 +34,7 @@ export default function Home() {
 			} else {
 				setError(data.error || 'Failed to extract transcript');
 			}
-		} catch (err) {
+		} catch {
 			setError('Network error: Failed to connect to transcript API');
 		} finally {
 			setLoading(false);
@@ -46,7 +46,7 @@ export default function Home() {
 			<main className="space-y-8">
 				<div className="text-center">
 					<h1 className="text-4xl font-bold text-gray-900 mb-4">
-						TLDW - Too Long; Didn't Watch
+						TLDW - Too Long; Didn&apos;t Watch
 					</h1>
 					<p className="text-lg text-gray-600">
 						Extract transcripts from YouTube videos using yt-dlp

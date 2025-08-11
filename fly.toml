@@ -1,22 +1,26 @@
-# fly.toml app configuration file generated for tldw
-app = "tldw"
-primary_region = "dfw"
+# fly.toml app configuration file generated for tldw-sparkling-flower-3840 on 2025-08-11T14:47:09-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'tldw-sparkling-flower-3840'
+primary_region = 'dfw'
 
 [build]
 
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  memory = "1gb"
-  cpu_kind = "shared"
+  memory = '1gb'
+  cpu_kind = 'shared'
   cpus = 1
 
 [[statics]]
-  guest_path = "/app/.next/static"
-  url_prefix = "/_next/static/"
+  guest_path = '/app/.next/static'
+  url_prefix = '/_next/static/'

@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
 				}
 
 				// Clean up the line by removing ALL timestamp and formatting tags
-				let cleanLine = trimmedLine
+				const cleanLine = trimmedLine
 					.replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, '') // Remove timestamp tags
 					.replace(/<c[^>]*>/g, '') // Remove <c> tags
 					.replace(/<\/c>/g, '') // Remove </c> tags
@@ -120,9 +120,12 @@ export async function POST(request: NextRequest) {
 				transcript: transcriptText,
 				extractedWith: 'yt-dlp',
 			});
-		} catch (execError: any) {
+		} catch (execError: unknown) {
 			console.error('yt-dlp execution error for video:', videoId);
-			console.error('Error details:', execError?.message || execError);
+			console.error(
+				'Error details:',
+				(execError as Error)?.message || execError
+			);
 			// Clean up any leftover files
 			try {
 				await execAsync(
@@ -136,7 +139,7 @@ export async function POST(request: NextRequest) {
 				{
 					error: 'Failed to extract subtitles with yt-dlp',
 					videoId,
-					details: execError?.message || 'Unknown error',
+					details: (execError as Error)?.message || 'Unknown error',
 				},
 				{ status: 500 }
 			);
