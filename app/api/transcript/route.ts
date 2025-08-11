@@ -45,11 +45,17 @@ export async function POST(request: NextRequest) {
 		// Use yt-dlp to extract captions
 		const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 		const subtitleFile = `${videoId}.en.vtt`;
-		const command = `yt-dlp -q --no-warnings --write-sub --write-auto-sub --sub-langs "en" --skip-download --sub-format "vtt" --output "%(id)s.%(ext)s" "${youtubeUrl}" > /dev/null 2>&1`;
+		const command = `yt-dlp --write-sub --write-auto-sub --sub-langs "en" --skip-download --sub-format "vtt" --output "%(id)s.%(ext)s" "${youtubeUrl}"`;
 
 		try {
-			// Download the subtitle file with timeout and larger buffer; output is suppressed above
-			await execAsync(command, { timeout: 45000, maxBuffer: 1024 * 1024 });
+			// Download the subtitle file with timeout and larger buffer
+			console.log('Executing yt-dlp command:', command);
+			const result = await execAsync(command, {
+				timeout: 45000,
+				maxBuffer: 1024 * 1024,
+			});
+			console.log('yt-dlp stdout:', result.stdout);
+			console.log('yt-dlp stderr:', result.stderr);
 
 			// Read the subtitle file without using exec to avoid maxBuffer limits
 			const subtitleContent = await fs.readFile(subtitleFile, 'utf-8');
@@ -126,6 +132,7 @@ export async function POST(request: NextRequest) {
 				'Error details:',
 				(execError as Error)?.message || execError
 			);
+			console.error('Full error object:', execError);
 			// Clean up any leftover files
 			try {
 				await execAsync(
