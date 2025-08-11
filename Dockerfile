@@ -24,6 +24,9 @@ RUN npm install -g pnpm && pnpm install --no-frozen-lockfile
 # Copy source code
 COPY . .
 
+# Create cookies directory
+RUN mkdir -p /app/cookies
+
 # Build the Next.js application
 RUN pnpm build
 

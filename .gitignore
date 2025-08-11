@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cookies (security sensitive)
+cookies/*.txt
+cookies/*.json
+!cookies/.gitkeep

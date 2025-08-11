@@ -45,7 +45,19 @@ export async function POST(request: NextRequest) {
 		// Use yt-dlp to extract captions
 		const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 		const subtitleFile = `${videoId}.en.vtt`;
-		const command = `yt-dlp --write-sub --write-auto-sub --sub-langs "en" --skip-download --sub-format "vtt" --output "%(id)s.%(ext)s" "${youtubeUrl}"`;
+		// Enhanced yt-dlp command with anti-detection measures
+		const command = `yt-dlp \
+			--write-sub \
+			--write-auto-sub \
+			--sub-langs "en" \
+			--skip-download \
+			--sub-format "vtt" \
+			--output "%(id)s.%(ext)s" \
+			--user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+			--sleep-requests 1 \
+			--sleep-subtitles 1 \
+			--cookies "/app/cookies/youtube.txt" \
+			"${youtubeUrl}"`;
 
 		try {
 			// Download the subtitle file with timeout and larger buffer
