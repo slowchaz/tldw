@@ -7,6 +7,111 @@ export const runtime = 'nodejs';
 
 const execAsync = promisify(exec);
 
+type TranscriptSegment = {
+	start: number; // seconds
+	end: number; // seconds
+	startTime: string; // HH:MM:SS.mmm
+	endTime: string; // HH:MM:SS.mmm
+	text: string;
+};
+
+function timeStringToSeconds(timeString: string): number {
+	// Expected VTT timestamp: HH:MM:SS.mmm (hours are required in VTT)
+	const match = timeString
+		.trim()
+		.match(/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/);
+	if (!match) return 0;
+	const hours = parseInt(match[1], 10) || 0;
+	const minutes = parseInt(match[2], 10) || 0;
+	const seconds = parseInt(match[3], 10) || 0;
+	const milliseconds = parseInt(match[4] || '0', 10) || 0;
+	return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+}
+
+function cleanVttText(line: string): string {
+	return line
+		.replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, '') // inline timestamp tags
+		.replace(/<c[^>]*>/g, '') // <c> style tags
+		.replace(/<\/c>/g, '')
+		.replace(/<[^>]*>/g, '') // any remaining HTML-like tags
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function parseVttToSegments(vttContent: string): TranscriptSegment[] {
+	const lines = vttContent.split('\n');
+	const segments: TranscriptSegment[] = [];
+	const seenText = new Set<string>();
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i].trim();
+
+		// Skip headers, notes, and empty lines
+		if (
+			line === '' ||
+			line.startsWith('WEBVTT') ||
+			line.startsWith('NOTE') ||
+			line.startsWith('Kind:') ||
+			line.startsWith('Language:') ||
+			/^\d+$/.test(line)
+		) {
+			continue;
+		}
+
+		// Timestamp cue line
+		if (line.includes('-->')) {
+			// Handle settings after timestamps, e.g., "align:start position:0%"
+			const [rawStart, rest] = line.split('-->');
+			const startTimeStr = rawStart.trim();
+			const endTimeStr = (rest || '').trim().split(/\s+/)[0] || '';
+
+			if (!startTimeStr || !endTimeStr) continue;
+
+			const start = timeStringToSeconds(startTimeStr);
+			const end = timeStringToSeconds(endTimeStr);
+
+			// Gather text lines until next blank line or next cue
+			let j = i + 1;
+			const textLines: string[] = [];
+			while (j < lines.length) {
+				const content = lines[j].trim();
+				if (content === '') break;
+				if (content.includes('-->')) break; // next cue started without blank line
+				if (
+					content.startsWith('NOTE') ||
+					content.startsWith('Kind:') ||
+					content.startsWith('Language:') ||
+					/^\d+$/.test(content)
+				) {
+					j++;
+					continue;
+				}
+				const cleaned = cleanVttText(content);
+				if (cleaned) textLines.push(cleaned);
+				j++;
+			}
+
+			const text = cleanVttText(textLines.join(' '));
+			if (text && !seenText.has(text)) {
+				seenText.add(text);
+				segments.push({
+					start,
+					end,
+					startTime: startTimeStr,
+					endTime: endTimeStr,
+					text,
+				});
+			}
+
+			i = j - 1; // continue after the consumed block
+		}
+
+		if (segments.length > 10000) break; // safety guard
+	}
+
+	return segments;
+}
+
 function extractVideoId(url: string): string | null {
 	// Handle various YouTube URL formats
 	const patterns = [
@@ -46,6 +151,11 @@ export async function POST(request: NextRequest) {
 		const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 		const subtitleFile = `${videoId}.en.vtt`;
 		// Enhanced yt-dlp command with anti-detection measures
+		// Use environment-aware cookies path: Docker uses /app/cookies, local uses ./cookies
+		const cookiesPath =
+			process.env.NODE_ENV === 'production'
+				? '/app/cookies/youtube.txt'
+				: './cookies/youtube.txt';
 		const command = `yt-dlp \
 			--write-sub \
 			--write-auto-sub \
@@ -56,7 +166,7 @@ export async function POST(request: NextRequest) {
 			--user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
 			--sleep-requests 1 \
 			--sleep-subtitles 1 \
-			--cookies "/app/cookies/youtube.txt" \
+			--cookies "${cookiesPath}" \
 			"${youtubeUrl}"`;
 
 		try {
@@ -77,55 +187,10 @@ export async function POST(request: NextRequest) {
 				`rm -f "${videoId}"*.vtt "${videoId}"*.srt 2>/dev/null || true`
 			);
 
-			// Parse VTT content to extract text
-			const lines = subtitleContent.split('\n');
-			const transcriptLines: string[] = [];
-			const seenText = new Set<string>(); // Avoid duplicate lines
+			// Parse VTT content to extract structured segments with timestamps
+			const segments = parseVttToSegments(subtitleContent);
 
-			for (const line of lines) {
-				const trimmedLine = line.trim();
-
-				// Skip empty lines, timestamps, and VTT headers
-				if (
-					trimmedLine === '' ||
-					trimmedLine.startsWith('WEBVTT') ||
-					trimmedLine.includes('-->') ||
-					trimmedLine.startsWith('NOTE') ||
-					trimmedLine.startsWith('Kind:') ||
-					trimmedLine.startsWith('Language:') ||
-					/^\d+$/.test(trimmedLine) ||
-					trimmedLine.includes('align:start position:') ||
-					trimmedLine.includes('align:middle') ||
-					trimmedLine.includes('align:end')
-				) {
-					continue;
-				}
-
-				// Clean up the line by removing ALL timestamp and formatting tags
-				const cleanLine = trimmedLine
-					.replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, '') // Remove timestamp tags
-					.replace(/<c[^>]*>/g, '') // Remove <c> tags
-					.replace(/<\/c>/g, '') // Remove </c> tags
-					.replace(/<[^>]*>/g, '') // Remove any other HTML tags
-					.replace(/\s+/g, ' ') // Normalize whitespace
-					.trim();
-
-				// Only add non-empty, unique lines
-				if (cleanLine && cleanLine.length > 1 && !seenText.has(cleanLine)) {
-					seenText.add(cleanLine);
-					transcriptLines.push(cleanLine);
-				}
-
-				// Prevent memory issues with extremely large files
-				if (transcriptLines.length > 10000) {
-					console.warn('Transcript too long, truncating at 10000 lines');
-					break;
-				}
-			}
-
-			const transcriptText = transcriptLines.join(' ').slice(0, 50000); // Limit to 50k characters
-
-			if (!transcriptText || transcriptText.trim() === '') {
+			if (!segments.length) {
 				return NextResponse.json(
 					{ error: 'No subtitles available for this video' },
 					{ status: 404 }
@@ -135,7 +200,7 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({
 				success: true,
 				videoId,
-				transcript: transcriptText,
+				segments,
 				extractedWith: 'yt-dlp',
 			});
 		} catch (execError: unknown) {
