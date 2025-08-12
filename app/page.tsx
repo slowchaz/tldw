@@ -203,6 +203,14 @@ export default function Home() {
 			: `${mins}:${two(secs)}`;
 	};
 
+	const formatRange = (start?: number, end?: number) => {
+		if (typeof start !== 'number') return '';
+		if (typeof end === 'number' && end > start) {
+			return `${formatSeconds(start)}–${formatSeconds(end)}`;
+		}
+		return `${formatSeconds(start)}`;
+	};
+
 	useEffect(() => {
 		if (!transcript || !videoId) return;
 		let cancelled = false;
@@ -296,44 +304,62 @@ export default function Home() {
 										)}
 									</div>
 									{outline?.sections?.length ? (
-										<div className="space-y-3">
+										<div className="space-y-4">
 											{outline.sections.map((section, idx) => (
 												<div
 													key={idx}
-													className="border border-gray-200 rounded-lg"
+													className="relative rounded-xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow group overflow-hidden"
 												>
+													<div className="absolute left-0 top-0 h-full w-1.5 bg-gradient-to-b from-blue-500/90 to-blue-400/60" />
 													<button
 														type="button"
 														onClick={() => jumpTo(section.start)}
-														className="w-full text-left px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-t-lg flex items-center justify-between"
+														className="w-full text-left px-4 pt-3 pb-2 flex items-start justify-between gap-3"
 													>
-														<span className="font-medium text-gray-900">
-															{section.title}
-														</span>
-														<span className="text-xs text-gray-600">
-															{formatSeconds(section.start)}
+														<div className="min-w-0">
+															<div className="flex items-center gap-2">
+																<span className="inline-flex items-center justify-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
+																	S{idx + 1}
+																</span>
+																<h3 className="font-semibold text-gray-900 truncate">
+																	{section.title}
+																</h3>
+															</div>
+														</div>
+														<span className="shrink-0 inline-flex items-center text-[11px] font-medium text-gray-700 bg-gray-100 rounded-full px-2 py-0.5">
+															{formatRange(section.start, section.end)}
 														</span>
 													</button>
-													{section.items?.length ? (
-														<ul className="divide-y divide-gray-100">
+													{!!section.items?.length && (
+														<ul className="px-2 pb-2">
 															{section.items.map((item, j) => (
-																<li key={j} className="px-3 py-2">
+																<li key={j} className="">
 																	<button
 																		type="button"
 																		onClick={() => jumpTo(item.start)}
-																		className="w-full text-left hover:text-blue-600 flex items-center justify-between"
+																		className="w-full text-left rounded-lg px-2 py-2 hover:bg-gray-50 transition flex items-start gap-2"
 																	>
-																		<span className="truncate">
-																			{item.title}
-																		</span>
-																		<span className="ml-3 shrink-0 text-xs text-gray-600">
-																			{formatSeconds(item.start)}
-																		</span>
+																		<span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500/70" />
+																		<div className="min-w-0 flex-1">
+																			<div className="flex items-center justify-between gap-3">
+																				<p className="text-sm font-medium text-gray-900 truncate">
+																					{item.title}
+																				</p>
+																				<span className="shrink-0 inline-flex items-center text-[10px] font-medium text-gray-700 bg-gray-100 rounded-full px-1.5 py-0.5">
+																					{formatRange(item.start, item.end)}
+																				</span>
+																			</div>
+																			{item.summary && (
+																				<p className="mt-0.5 text-xs text-gray-600 line-clamp-2">
+																					{item.summary}
+																				</p>
+																			)}
+																		</div>
 																	</button>
 																</li>
 															))}
 														</ul>
-													) : null}
+													)}
 												</div>
 											))}
 										</div>

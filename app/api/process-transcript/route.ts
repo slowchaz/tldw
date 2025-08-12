@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import Anthropic from '@anthropic-ai/sdk';
 
 export const runtime = 'nodejs';
 
@@ -29,26 +30,49 @@ type OutlineResponse = {
 };
 
 function buildPrompt(segments: TranscriptSegment[]): string {
-	const instruction = `You are given a timestamped transcript segmented by time ranges.
-Create a concise, scannable outline suitable for quickly navigating a video.
+	// Keep payload size reasonable. If too many segments, sample evenly across the entire video
+	const MAX_SEGMENTS = 600; // conservative to avoid oversized requests
+	let selected: TranscriptSegment[] = segments;
+	if (segments.length > MAX_SEGMENTS) {
+		const total = segments.length;
+		const picks: TranscriptSegment[] = [];
+		// Evenly spaced indices including first and last
+		for (let i = 0; i < MAX_SEGMENTS; i++) {
+			const idx = Math.round((i * (total - 1)) / (MAX_SEGMENTS - 1));
+			picks.push(segments[idx]);
+		}
+		selected = picks;
+	}
+
+	// Calculate video duration for the prompt
+	const videoDuration =
+		selected.length > 0 ? Math.max(...selected.map((s) => s.end)) : 0;
+	const durationMinutes = Math.round(videoDuration / 60);
+
+	const instruction = `You are given a timestamped transcript segmented by time ranges from a ${durationMinutes}-minute video.
+Create a concise, scannable outline suitable for quickly navigating the ENTIRE video duration.
+
+CRITICAL: The outline must span the full ${durationMinutes}-minute video. Do not stop at early timestamps.
 
 Requirements:
 - Return only strict JSON matching this TypeScript type (no extra text):
   { "sections": Array<{ "title": string; "start": number; "end"?: number; "items": Array<{ "title": string; "start": number; "end"?: number; "summary"?: string }> }> }
-- 4-10 sections total. Each section should have a meaningful title and a representative start time (in seconds). Include end when clear.
+- 4-10 sections total distributed across the FULL video duration (0 to ~${videoDuration} seconds).
+- Each section should have a meaningful title and a representative start time (in seconds). Include end when clear.
 - For each section, include 3-8 key items with short, action-oriented titles. Include start (and end if obvious).
 - Prefer timestamps that align with the provided segment boundaries.
 - Keep titles and summaries concise and useful.
+- ENSURE sections cover the entire video timeline, not just the beginning.
 `;
 
-	// Keep payload size reasonable. Use the first N segments and sample across the rest if huge
-	const MAX_SEGMENTS = 600; // conservative to avoid oversized requests
-	let selected: TranscriptSegment[] = segments;
-	if (segments.length > MAX_SEGMENTS) {
-		const head = segments.slice(0, 300);
-		const tail = segments.slice(-300);
-		selected = [...head, ...tail];
-	}
+	console.log(
+		`Building outline for ${durationMinutes}-minute video with ${selected.length} segments (${segments.length} original)`
+	);
+	console.log(
+		`Segment time range: ${selected[0]?.start || 0}s - ${
+			selected[selected.length - 1]?.end || 0
+		}s`
+	);
 
 	return `${instruction}\nTRANSCRIPT_SEGMENTS_JSON = ${JSON.stringify(
 		selected
@@ -88,50 +112,38 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const apiKey = process.env.OPENAI_API_KEY;
+		const apiKey = process.env.ANTHROPIC_API_KEY;
 		if (!apiKey) {
 			return NextResponse.json(
-				{ error: 'Missing OPENAI_API_KEY server configuration' },
+				{ error: 'Missing ANTHROPIC_API_KEY server configuration' },
 				{ status: 500 }
 			);
 		}
 
-		const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+		const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 
 		const prompt = buildPrompt(segments);
 
-		const response = await fetch('https://api.openai.com/v1/chat/completions', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${apiKey}`,
-			},
-			body: JSON.stringify({
-				model,
-				messages: [
-					{
-						role: 'system',
-						content:
-							'You are a precise content structurer. Always return strict JSON only. No prose. No markdown.',
-					},
-					{ role: 'user', content: prompt },
-				],
-				temperature: 0.2,
-				// Ask for a JSON object. If unsupported by a given model, the system instruction still requests JSON-only.
-				response_format: { type: 'json_object' },
-			}),
+		const anthropic = new Anthropic({
+			apiKey: apiKey,
 		});
 
-		if (!response.ok) {
-			const errText = await response.text();
-			return NextResponse.json(
-				{ error: 'LLM request failed', details: errText },
-				{ status: 502 }
-			);
-		}
+		const response = await anthropic.messages.create({
+			model: model,
+			max_tokens: 4000,
+			temperature: 1,
+			system:
+				'You are a precise content structurer. Always return strict JSON only. No prose. No markdown.',
+			messages: [
+				{
+					role: 'user',
+					content: prompt,
+				},
+			],
+		});
 
-		const json = (await response.json()) as any;
-		const content: string = json?.choices?.[0]?.message?.content ?? '';
+		const content: string =
+			response.content[0]?.type === 'text' ? response.content[0].text : '';
 		const parsed = safeParseOutline(content);
 		if (!parsed) {
 			return NextResponse.json(
