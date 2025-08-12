@@ -29,7 +29,7 @@ type OutlineResponse = {
 	sections: OutlineSection[];
 };
 
-function buildPrompt(segments: TranscriptSegment[]): string {
+function buildInsightsPrompt(segments: TranscriptSegment[]): string {
 	// Keep payload size reasonable. If too many segments, sample evenly across the entire video
 	const MAX_SEGMENTS = 600; // conservative to avoid oversized requests
 	let selected: TranscriptSegment[] = segments;
@@ -49,20 +49,24 @@ function buildPrompt(segments: TranscriptSegment[]): string {
 		selected.length > 0 ? Math.max(...selected.map((s) => s.end)) : 0;
 	const durationMinutes = Math.round(videoDuration / 60);
 
-	const instruction = `You are given a timestamped transcript segmented by time ranges from a ${durationMinutes}-minute video.
-Create a concise, scannable outline suitable for quickly navigating the ENTIRE video duration.
+	const instruction = `You are given a timestamped transcript from a ${durationMinutes}-minute video.
+Extract the most insightful, quotable statements that people would want to share and discuss.
 
-CRITICAL: The outline must span the full ${durationMinutes}-minute video. Do not stop at early timestamps.
+CRITICAL: Coverage must span the full ${durationMinutes}-minute video duration. Do not stop at early timestamps.
+
+Your goal: Identify the key insights and memorable statements that capture the essence of what makes this content worth watching.
 
 Requirements:
 - Return only strict JSON matching this TypeScript type (no extra text):
-  { "sections": Array<{ "title": string; "start": number; "end"?: number; "items": Array<{ "title": string; "start": number; "end"?: number; "summary"?: string }> }> }
-- 4-10 sections total distributed across the FULL video duration (0 to ~${videoDuration} seconds).
-- Each section should have a meaningful title and a representative start time (in seconds). Include end when clear.
-- For each section, include 3-8 key items with short, action-oriented titles. Include start (and end if obvious).
-- Prefer timestamps that align with the provided segment boundaries.
-- Keep titles and summaries concise and useful.
-- ENSURE sections cover the entire video timeline, not just the beginning.
+  { "sections": Array<{ "title": string; "start": number; "end": number }> }
+- 4-10 key insights distributed across the FULL video duration (0 to ~${videoDuration} seconds).
+- CRITICAL: NO OVERLAPPING TIMESTAMPS. Each section must have distinct time ranges that don't overlap.
+- Sections should be in chronological order with clear gaps between them.
+- Section titles should be insightful, quotable statements that capture the core message (e.g., "Success is a system, not a goal", "The compound effect of small decisions", "Why expertise alone isn't enough")
+- Focus on actionable insights, profound realizations, counter-intuitive truths, and memorable frameworks
+- Use clear, direct language that feels authentic and substantive
+- Each section should represent a coherent segment where this insight is discussed
+- ENSURE coverage spans the entire video timeline with NO timestamp overlaps.
 `;
 
 	console.log(
@@ -79,11 +83,45 @@ Requirements:
 	)}`;
 }
 
-function safeParseOutline(content: string): OutlineResponse | null {
+function buildContextPrompt(
+	segments: TranscriptSegment[],
+	insight: { title: string; start: number; end: number }
+): string {
+	// Filter segments to the relevant time range for this insight
+	const relevantSegments = segments.filter(
+		(s) => s.start >= insight.start && s.end <= insight.end
+	);
+
+	const instruction = `You are given a timestamped transcript segment and a main insight statement.
+Generate supporting context items that explain and provide evidence for this insight.
+
+INSIGHT: "${insight.title}"
+TIME RANGE: ${insight.start}s - ${insight.end}s
+
+Your goal: Create 3-8 supporting items that break down and explain this main insight using specific content from the transcript.
+
+Requirements:
+- Return only strict JSON matching this TypeScript type (no extra text):
+  { "items": Array<{ "title": string; "start": number; "end"?: number; "summary": string }> }
+- Items should have non-overlapping timestamps within the ${insight.start}s - ${insight.end}s range
+- Item titles should be concise explanations that break down the main concept (e.g., "Daily habits matter more than motivation", "Small consistent actions compound over time")
+- Summaries should provide specific context from the transcript that supports the main insight
+- Keep summaries concise and easily digestible
+- Items should be in chronological order within the time range
+- Focus on concrete examples, evidence, or explanations that make the main insight more understandable
+`;
+
+	return `${instruction}\nTRANSCRIPT_SEGMENTS_JSON = ${JSON.stringify(
+		relevantSegments
+	)}`;
+}
+
+function safeParseInsights(
+	content: string
+): { sections: Array<{ title: string; start: number; end: number }> } | null {
 	try {
 		const parsed = JSON.parse(content);
-		if (parsed && Array.isArray(parsed.sections))
-			return parsed as OutlineResponse;
+		if (parsed && Array.isArray(parsed.sections)) return parsed;
 	} catch {}
 	// Try to extract outermost JSON object if the model added extra text
 	const start = content.indexOf('{');
@@ -91,8 +129,24 @@ function safeParseOutline(content: string): OutlineResponse | null {
 	if (start !== -1 && end !== -1 && end > start) {
 		try {
 			const parsed = JSON.parse(content.slice(start, end + 1));
-			if (parsed && Array.isArray(parsed.sections))
-				return parsed as OutlineResponse;
+			if (parsed && Array.isArray(parsed.sections)) return parsed;
+		} catch {}
+	}
+	return null;
+}
+
+function safeParseContext(content: string): { items: OutlineItem[] } | null {
+	try {
+		const parsed = JSON.parse(content);
+		if (parsed && Array.isArray(parsed.items)) return parsed;
+	} catch {}
+	// Try to extract outermost JSON object if the model added extra text
+	const start = content.indexOf('{');
+	const end = content.lastIndexOf('}');
+	if (start !== -1 && end !== -1 && end > start) {
+		try {
+			const parsed = JSON.parse(content.slice(start, end + 1));
+			if (parsed && Array.isArray(parsed.items)) return parsed;
 		} catch {}
 	}
 	return null;
@@ -121,38 +175,73 @@ export async function POST(request: NextRequest) {
 		}
 
 		const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+		const anthropic = new Anthropic({ apiKey: apiKey });
 
-		const prompt = buildPrompt(segments);
-
-		const anthropic = new Anthropic({
-			apiKey: apiKey,
-		});
-
-		const response = await anthropic.messages.create({
+		// Step 1: Generate main insights
+		const insightsPrompt = buildInsightsPrompt(segments);
+		const insightsResponse = await anthropic.messages.create({
 			model: model,
-			max_tokens: 4000,
+			max_tokens: 3000,
 			temperature: 1,
 			system:
-				'You are a precise content structurer. Always return strict JSON only. No prose. No markdown.',
+				'You are an expert at extracting the most valuable, quotable insights from content. Generate clear, insightful titles that people would want to share and discuss. Focus on substance over sensationalism. Always return strict JSON only. No prose. No markdown.',
 			messages: [
 				{
 					role: 'user',
-					content: prompt,
+					content: insightsPrompt,
 				},
 			],
 		});
 
-		const content: string =
-			response.content[0]?.type === 'text' ? response.content[0].text : '';
-		const parsed = safeParseOutline(content);
-		if (!parsed) {
+		const insightsContent: string =
+			insightsResponse.content[0]?.type === 'text'
+				? insightsResponse.content[0].text
+				: '';
+		const insights = safeParseInsights(insightsContent);
+		if (!insights || !insights.sections?.length) {
 			return NextResponse.json(
-				{ error: 'Failed to parse LLM JSON response' },
+				{ error: 'Failed to parse insights response' },
 				{ status: 500 }
 			);
 		}
 
-		return NextResponse.json({ success: true, outline: parsed });
+		// Step 2: Generate context for each insight
+		const sectionsWithItems: OutlineSection[] = [];
+		for (const insight of insights.sections) {
+			const contextPrompt = buildContextPrompt(segments, insight);
+			const contextResponse = await anthropic.messages.create({
+				model: model,
+				max_tokens: 2000,
+				temperature: 1,
+				system:
+					'You are an expert at providing clear, digestible context that explains insights. Generate supporting items that break down and explain the main concept using specific examples from the content. Always return strict JSON only. No prose. No markdown.',
+				messages: [
+					{
+						role: 'user',
+						content: contextPrompt,
+					},
+				],
+			});
+
+			const contextContent: string =
+				contextResponse.content[0]?.type === 'text'
+					? contextResponse.content[0].text
+					: '';
+			const context = safeParseContext(contextContent);
+
+			sectionsWithItems.push({
+				title: insight.title,
+				start: insight.start,
+				end: insight.end,
+				items: context?.items || [],
+			});
+		}
+
+		const finalOutline: OutlineResponse = {
+			sections: sectionsWithItems,
+		};
+
+		return NextResponse.json({ success: true, outline: finalOutline });
 	} catch (error) {
 		console.error('process-transcript error:', error);
 		return NextResponse.json(

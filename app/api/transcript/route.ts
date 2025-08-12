@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		// Use yt-dlp to extract captions
+		// Use yt-dlp to extract captions and video info
 		const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 		const subtitleFile = `${videoId}.en.vtt`;
 		// Enhanced yt-dlp command with anti-detection measures
@@ -156,18 +156,36 @@ export async function POST(request: NextRequest) {
 			process.env.NODE_ENV === 'production'
 				? '/app/cookies/youtube.txt'
 				: './cookies/youtube.txt';
+
+		// First get video title
+		let videoTitle = 'Unknown Video';
+		try {
+			const infoCommand = `yt-dlp --dump-json --no-warnings --cookies "${cookiesPath}" "${youtubeUrl}"`;
+			console.log('Getting video info for title...');
+			const infoResult = await execAsync(infoCommand, {
+				timeout: 15000,
+				maxBuffer: 1024 * 1024,
+			});
+			const videoInfo = JSON.parse(infoResult.stdout);
+			videoTitle = videoInfo.title || 'Unknown Video';
+			console.log('Video title:', videoTitle);
+		} catch (titleError) {
+			console.warn('Could not fetch video title:', titleError);
+			// Continue without title
+		}
+
 		const command = `yt-dlp \
-			--write-sub \
-			--write-auto-sub \
-			--sub-langs "en" \
-			--skip-download \
-			--sub-format "vtt" \
-			--output "%(id)s.%(ext)s" \
-			--user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-			--sleep-requests 1 \
-			--sleep-subtitles 1 \
-			--cookies "${cookiesPath}" \
-			"${youtubeUrl}"`;
+		--write-sub \
+		--write-auto-sub \
+		--sub-langs "en" \
+		--skip-download \
+		--sub-format "vtt" \
+		--output "%(id)s.%(ext)s" \
+		--user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+		--sleep-requests 1 \
+		--sleep-subtitles 1 \
+		--cookies "${cookiesPath}" \
+		"${youtubeUrl}"`;
 
 		try {
 			// Download the subtitle file with timeout and larger buffer
@@ -200,6 +218,7 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({
 				success: true,
 				videoId,
+				videoTitle,
 				segments,
 				extractedWith: 'yt-dlp',
 			});

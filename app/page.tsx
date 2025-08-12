@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 
 declare global {
 	interface Window {
@@ -71,6 +71,7 @@ export default function Home() {
 	const [transcript, setTranscript] = useState('');
 	const [error, setError] = useState('');
 	const [videoId, setVideoId] = useState<string>('');
+	const [videoTitle, setVideoTitle] = useState<string>('');
 	const [segments, setSegments] = useState<TranscriptSegment[]>([]);
 	const [outline, setOutline] = useState<OutlineResponse | null>(null);
 	const [outlineLoading, setOutlineLoading] = useState(false);
@@ -79,15 +80,29 @@ export default function Home() {
 		outline: false,
 	});
 	const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+	const [currentVideoTime, setCurrentVideoTime] = useState(0);
+	const [viewMode, setViewMode] = useState<
+		'titles' | 'insights-list' | 'individual'
+	>('titles');
+	const [selectedSectionIndex, setSelectedSectionIndex] = useState<
+		number | null
+	>(null);
 	const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(
 		null
 	);
 	const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(
 		null
 	);
+	const [swipeDirection, setSwipeDirection] = useState<'up' | 'down' | null>(
+		null
+	);
+	const [isDragging, setIsDragging] = useState(false);
+	const [dragOffset, setDragOffset] = useState(0);
 
 	const playerRef = useRef<any | null>(null);
 	const apiReadyPromiseRef = useRef<Promise<void> | null>(null);
+	const [playerReady, setPlayerReady] = useState(false);
+	const pendingJumpRef = useRef<number | null>(null);
 
 	// Cache utility functions
 	const getCachedTranscript = (videoId: string) => {
@@ -101,7 +116,7 @@ export default function Home() {
 
 	const setCachedTranscript = (
 		videoId: string,
-		data: { segments: TranscriptSegment[] }
+		data: { segments: TranscriptSegment[]; videoTitle?: string }
 	) => {
 		try {
 			localStorage.setItem(`transcript_${videoId}`, JSON.stringify(data));
@@ -169,6 +184,8 @@ export default function Home() {
 				} catch {}
 				playerRef.current = null;
 			}
+			setPlayerReady(false);
+			pendingJumpRef.current = null;
 		};
 	}, []);
 
@@ -183,6 +200,7 @@ export default function Home() {
 		setTranscript('');
 		setSegments([]);
 		setOutline(null);
+		setVideoTitle('');
 		setFromCache({ transcript: false, outline: false });
 		const parsedId = getYouTubeVideoId(url.trim());
 		setVideoId(parsedId || '');
@@ -198,6 +216,9 @@ export default function Home() {
 						.map((s: TranscriptSegment) => s.text)
 						.join('\n')
 				);
+				if (cachedTranscript.videoTitle) {
+					setVideoTitle(cachedTranscript.videoTitle);
+				}
 				setFromCache((prev) => ({ ...prev, transcript: true }));
 				setLoading(false);
 				// Process outline (which will also check cache)
@@ -221,6 +242,7 @@ export default function Home() {
 				if (Array.isArray(data.segments)) {
 					const transcriptData = {
 						segments: data.segments as TranscriptSegment[],
+						videoTitle: data.videoTitle,
 					};
 					setSegments(transcriptData.segments);
 					setTranscript(transcriptData.segments.map((s) => s.text).join('\n'));
@@ -238,6 +260,9 @@ export default function Home() {
 				}
 				if (data.videoId) {
 					setVideoId(data.videoId);
+				}
+				if (data.videoTitle) {
+					setVideoTitle(data.videoTitle);
 				}
 			} else {
 				setError(data.error || 'Failed to extract transcript');
@@ -296,15 +321,30 @@ export default function Home() {
 		}
 	};
 
-	const jumpTo = (seconds: number) => {
-		if (!seconds || !playerRef.current) return;
-		try {
-			playerRef.current.seekTo(seconds, true);
-			if (typeof playerRef.current.playVideo === 'function') {
-				playerRef.current.playVideo();
+	const jumpTo = useCallback(
+		(seconds: number) => {
+			if (!seconds) return;
+
+			// If player is not ready, store the pending jump
+			if (!playerReady || !playerRef.current) {
+				pendingJumpRef.current = seconds;
+				return;
 			}
-		} catch {}
-	};
+
+			try {
+				playerRef.current.seekTo(seconds, true);
+				if (typeof playerRef.current.playVideo === 'function') {
+					playerRef.current.playVideo();
+				}
+				// Clear any pending jump since we successfully jumped
+				pendingJumpRef.current = null;
+			} catch {
+				// Store as pending jump if API call fails
+				pendingJumpRef.current = seconds;
+			}
+		},
+		[playerReady]
+	);
 
 	const formatSeconds = (totalSeconds: number) => {
 		const s = Math.max(0, Math.floor(totalSeconds || 0));
@@ -326,7 +366,7 @@ export default function Home() {
 	};
 
 	// Swipe functionality
-	const minSwipeDistance = 50;
+	const minSwipeDistance = 30;
 
 	const onTouchStart = (e: React.TouchEvent) => {
 		setTouchEnd(null);
@@ -334,17 +374,45 @@ export default function Home() {
 			x: e.targetTouches[0].clientX,
 			y: e.targetTouches[0].clientY,
 		});
+		setIsDragging(true);
+		setDragOffset(0);
+		setSwipeDirection(null);
 	};
 
 	const onTouchMove = (e: React.TouchEvent) => {
-		setTouchEnd({
+		if (!touchStart) return;
+
+		const currentTouch = {
 			x: e.targetTouches[0].clientX,
 			y: e.targetTouches[0].clientY,
-		});
+		};
+
+		setTouchEnd(currentTouch);
+
+		const distanceY = touchStart.y - currentTouch.y;
+		const distanceX = touchStart.x - currentTouch.x;
+		const isVerticalSwipe = Math.abs(distanceY) > Math.abs(distanceX);
+
+		if (isVerticalSwipe) {
+			// Limit drag to reasonable bounds with more responsive feedback
+			const maxDrag = 150;
+			const clampedOffset = Math.max(-maxDrag, Math.min(maxDrag, distanceY));
+			setDragOffset(clampedOffset);
+
+			// Determine swipe direction with lower threshold for better feedback
+			if (Math.abs(distanceY) > 15) {
+				setSwipeDirection(distanceY > 0 ? 'up' : 'down');
+			}
+		}
 	};
 
 	const onTouchEnd = () => {
-		if (!touchStart || !touchEnd) return;
+		if (!touchStart || !touchEnd) {
+			setIsDragging(false);
+			setDragOffset(0);
+			setSwipeDirection(null);
+			return;
+		}
 
 		const distanceX = touchStart.x - touchEnd.x;
 		const distanceY = touchStart.y - touchEnd.y;
@@ -352,13 +420,18 @@ export default function Home() {
 
 		if (isVerticalSwipe && Math.abs(distanceY) > minSwipeDistance) {
 			if (distanceY > 0) {
-				// Swipe up - next section
-				navigateToSection(currentSectionIndex + 1);
+				// Swipe up - next item in flat navigation
+				navigateToFlatIndex(getCurrentFlatIndex + 1);
 			} else {
-				// Swipe down - previous section
-				navigateToSection(currentSectionIndex - 1);
+				// Swipe down - previous item in flat navigation
+				navigateToFlatIndex(getCurrentFlatIndex - 1);
 			}
 		}
+
+		// Reset drag state
+		setIsDragging(false);
+		setDragOffset(0);
+		setSwipeDirection(null);
 	};
 
 	const navigateToSection = (index: number) => {
@@ -374,19 +447,271 @@ export default function Home() {
 		}
 	};
 
-	// Reset section index when outline changes
+	const selectTitle = (sectionIndex: number) => {
+		setSelectedSectionIndex(sectionIndex);
+		setCurrentSectionIndex(sectionIndex);
+		setViewMode('insights-list');
+
+		// Only jump to video if this section is not already playing
+		const activeContent = getCurrentActiveContent;
+		const isAlreadyPlaying = activeContent.sectionIndex === sectionIndex;
+
+		if (!isAlreadyPlaying) {
+			const section = outline?.sections?.[sectionIndex];
+			if (section?.start) {
+				jumpTo(section.start);
+			}
+		}
+	};
+
+	const selectInsight = (sectionIndex: number, itemIndex?: number) => {
+		setSelectedSectionIndex(sectionIndex);
+		setCurrentSectionIndex(sectionIndex);
+		setViewMode('individual');
+
+		// Only jump to video if this insight is not already playing
+		const activeContent = getCurrentActiveContent;
+		const isAlreadyPlaying =
+			activeContent.sectionIndex === sectionIndex &&
+			(itemIndex === undefined || activeContent.itemIndex === itemIndex);
+
+		if (!isAlreadyPlaying) {
+			// Jump to specific item or section start
+			const section = outline?.sections?.[sectionIndex];
+			const item = itemIndex !== undefined ? section?.items?.[itemIndex] : null;
+			const startTime = item?.start || section?.start;
+			if (startTime) {
+				jumpTo(startTime);
+			}
+		}
+	};
+
+	// Reset states when outline changes
 	useEffect(() => {
 		setCurrentSectionIndex(0);
+		setViewMode('titles');
+		setSelectedSectionIndex(null);
+		// Clear any pending jumps when outline changes
+		pendingJumpRef.current = null;
 	}, [outline]);
+
+	// Handle going back to title selection
+	useEffect(() => {
+		if (viewMode === 'titles') {
+			// Clear any pending jumps when going back to titles
+			pendingJumpRef.current = null;
+		}
+	}, [viewMode]);
+
+	// Get current active section and item based on video time
+	const getCurrentActiveContent = useMemo(() => {
+		if (!outline?.sections?.length) {
+			return { sectionIndex: 0, itemIndex: -1 };
+		}
+
+		// If no video time yet, return first section
+		if (!currentVideoTime) {
+			return { sectionIndex: 0, itemIndex: -1 };
+		}
+
+		// Find the section that contains the current time
+		for (let i = 0; i < outline.sections.length; i++) {
+			const section = outline.sections[i];
+			const nextSection = outline.sections[i + 1];
+
+			// Check if current time is within this section
+			const inSection =
+				currentVideoTime >= section.start - 1 && // Add 1 second buffer before
+				(!nextSection || currentVideoTime < nextSection.start);
+
+			if (inSection) {
+				// Find active item within this section
+				let activeItemIndex = -1;
+				if (section.items?.length) {
+					for (let j = 0; j < section.items.length; j++) {
+						const item = section.items[j];
+						const nextItem = section.items[j + 1];
+
+						if (
+							currentVideoTime >= item.start - 1 && // Add 1 second buffer before
+							(!nextItem || currentVideoTime < nextItem.start)
+						) {
+							activeItemIndex = j;
+							break;
+						}
+					}
+				}
+
+				return { sectionIndex: i, itemIndex: activeItemIndex };
+			}
+		}
+
+		// If we're beyond all sections, return the last section
+		const lastSectionIndex = outline.sections.length - 1;
+		return { sectionIndex: lastSectionIndex, itemIndex: -1 };
+	}, [outline, currentVideoTime]);
+
+	// Flattened navigation system
+	const createFlatNavigation = useMemo(() => {
+		if (!outline?.sections?.length) return [];
+
+		const flatItems: Array<{
+			type: 'section' | 'item';
+			sectionIndex: number;
+			itemIndex?: number;
+			title: string;
+			start: number;
+			end?: number;
+			summary?: string;
+		}> = [];
+
+		outline.sections.forEach((section, sectionIndex) => {
+			// Add the main section
+			flatItems.push({
+				type: 'section',
+				sectionIndex,
+				title: section.title,
+				start: section.start,
+				end: section.end,
+			});
+
+			// Add all sub-items for this section
+			if (section.items?.length) {
+				section.items.forEach((item, itemIndex) => {
+					flatItems.push({
+						type: 'item',
+						sectionIndex,
+						itemIndex,
+						title: item.title,
+						start: item.start,
+						end: item.end,
+						summary: item.summary,
+					});
+				});
+			}
+		});
+
+		return flatItems;
+	}, [outline]);
+
+	// Get current flat navigation index
+	const getCurrentFlatIndex = useMemo(() => {
+		if (!createFlatNavigation.length) return 0;
+
+		const activeContent = getCurrentActiveContent;
+
+		// Find the matching item in flat navigation
+		for (let i = 0; i < createFlatNavigation.length; i++) {
+			const flatItem = createFlatNavigation[i];
+
+			if (
+				flatItem.type === 'section' &&
+				flatItem.sectionIndex === activeContent.sectionIndex
+			) {
+				// If we're in a section but no specific item is active, return the section
+				if (activeContent.itemIndex < 0) {
+					return i;
+				}
+			} else if (
+				flatItem.type === 'item' &&
+				flatItem.sectionIndex === activeContent.sectionIndex &&
+				flatItem.itemIndex === activeContent.itemIndex
+			) {
+				// Return the specific sub-item
+				return i;
+			}
+		}
+
+		return 0;
+	}, [createFlatNavigation, getCurrentActiveContent]);
+
+	// Calculate video progress percentage
+	const getVideoProgress = useMemo(() => {
+		if (!segments.length || !currentVideoTime) return 0;
+
+		// Get the total duration from the last segment
+		const totalDuration = segments[segments.length - 1]?.end || 0;
+		if (totalDuration === 0) return 0;
+
+		// Calculate progress as percentage
+		const progress = Math.min(
+			100,
+			Math.max(0, (currentVideoTime / totalDuration) * 100)
+		);
+		return progress;
+	}, [segments, currentVideoTime]);
+
+	// Navigate to flat index
+	const navigateToFlatIndex = (index: number) => {
+		if (!createFlatNavigation.length) return;
+
+		const clampedIndex = Math.max(
+			0,
+			Math.min(index, createFlatNavigation.length - 1)
+		);
+		const targetItem = createFlatNavigation[clampedIndex];
+
+		if (!targetItem) return;
+
+		// Update section index
+		setCurrentSectionIndex(targetItem.sectionIndex);
+
+		// Jump to the timestamp
+		if (targetItem.start) {
+			jumpTo(targetItem.start);
+		}
+	};
+
+	// Update current section based on video time
+	useEffect(() => {
+		const { sectionIndex } = getCurrentActiveContent;
+		setCurrentSectionIndex((prevIndex) => {
+			return sectionIndex !== prevIndex ? sectionIndex : prevIndex;
+		});
+	}, [getCurrentActiveContent]);
+
+	// Handle pending jumps when player becomes ready
+	useEffect(() => {
+		if (playerReady && pendingJumpRef.current) {
+			jumpTo(pendingJumpRef.current);
+		}
+	}, [playerReady, jumpTo]);
+
+	// Track video time
+	useEffect(() => {
+		if (!transcript || !videoId || !playerRef.current) return;
+
+		const interval = setInterval(() => {
+			try {
+				if (
+					playerRef.current &&
+					typeof playerRef.current.getCurrentTime === 'function'
+				) {
+					const time = playerRef.current.getCurrentTime();
+					setCurrentVideoTime(time || 0);
+				}
+			} catch {
+				// Ignore errors
+			}
+		}, 500); // Update every 500ms for better responsiveness
+
+		return () => clearInterval(interval);
+	}, [transcript, videoId, playerRef.current]);
 
 	useEffect(() => {
 		if (!transcript || !videoId) return;
 		let cancelled = false;
+
+		// Reset player ready state when initializing
+		setPlayerReady(false);
+
 		ensureYouTubeIframeAPI().then(() => {
 			if (cancelled) return;
 			if (playerRef.current) {
 				try {
 					playerRef.current.cueVideoById(videoId);
+					// Player is already initialized, mark as ready
+					setPlayerReady(true);
 				} catch {}
 				return;
 			}
@@ -398,16 +723,29 @@ export default function Home() {
 						rel: 0,
 						playsinline: 1,
 					},
+					events: {
+						onReady: () => {
+							if (!cancelled) {
+								setPlayerReady(true);
+							}
+						},
+						onError: () => {
+							if (!cancelled) {
+								setPlayerReady(false);
+							}
+						},
+					},
 				});
 			} catch {}
 		});
 		return () => {
 			cancelled = true;
+			setPlayerReady(false);
 		};
 	}, [transcript, videoId]);
 
 	return (
-		<div className="font-sans min-h-screen bg-black">
+		<div className="font-sans min-h-screen bg-white">
 			{/* Input Section - Only shown when no transcript */}
 			{!transcript && (
 				<div className="bg-white min-h-screen flex items-center justify-center">
@@ -456,19 +794,47 @@ export default function Home() {
 				</div>
 			)}
 
-			{/* Main Content - Video + Clips */}
+			{/* Main Content */}
 			{transcript && (
 				<div className="relative">
-					{/* Fixed Video Player at Top */}
+					{/* Fixed Video Player at Top - Always Visible */}
 					<div className="sticky top-0 z-10 bg-black">
 						<div className="w-full aspect-video">
 							<div id="player" className="w-full h-full" />
 						</div>
 
 						{/* Video Controls/Info Bar */}
-						<div className="bg-black border-b border-gray-900 px-6 py-3">
+						<div className="bg-black px-6 py-3">
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
+									{/* TikTok-style back button - only show when not in title selection */}
+									{viewMode !== 'titles' && (
+										<button
+											onClick={() => {
+												if (viewMode === 'individual') {
+													setViewMode('insights-list');
+												} else {
+													setViewMode('titles');
+												}
+											}}
+											className="p-2 -m-2 text-white hover:text-gray-300 transition-colors"
+											aria-label="Back"
+										>
+											<svg
+												className="w-6 h-6"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													strokeWidth={2}
+													d="M15 19l-7-7 7-7"
+												/>
+											</svg>
+										</button>
+									)}
 									{fromCache.outline && (
 										<span className="text-xs text-gray-500">Cached</span>
 									)}
@@ -491,9 +857,20 @@ export default function Home() {
 											setSegments([]);
 											setOutline(null);
 											setVideoId('');
+											setVideoTitle('');
 											setUrl('');
 											setError('');
 											setFromCache({ transcript: false, outline: false });
+											setViewMode('titles');
+											setSelectedSectionIndex(null);
+											setCurrentSectionIndex(0);
+											if (playerRef.current) {
+												try {
+													playerRef.current.destroy();
+												} catch {}
+												playerRef.current = null;
+											}
+											setPlayerReady(false);
 										}}
 										className="text-xs text-gray-500 hover:text-white transition-colors"
 									>
@@ -504,101 +881,415 @@ export default function Home() {
 						</div>
 					</div>
 
-					{/* Swipeable Clips Feed */}
-					<div className="bg-white min-h-screen">
-						{outline?.sections?.length ? (
-							<div
-								className="relative"
-								onTouchStart={onTouchStart}
-								onTouchMove={onTouchMove}
-								onTouchEnd={onTouchEnd}
-							>
-								{/* Current Section Display */}
-								{outline.sections[currentSectionIndex] && (
-									<div className="px-6 py-8 min-h-[80vh] pb-24">
-										{/* Section Header */}
-										<button
-											type="button"
-											onClick={() =>
-												jumpTo(outline.sections[currentSectionIndex].start)
-											}
-											className="w-full text-left mb-12 group"
-										>
-											<div className="flex items-start justify-between gap-6">
-												<h2 className="text-2xl font-normal text-black leading-tight">
-													{outline.sections[currentSectionIndex].title}
-												</h2>
-												<span className="text-sm text-gray-500 mt-1">
-													{formatRange(
-														outline.sections[currentSectionIndex].start,
-														outline.sections[currentSectionIndex].end
-													)}
-												</span>
-											</div>
-										</button>
-
-										{/* Section Items */}
-										{!!outline.sections[currentSectionIndex].items?.length && (
-											<div className="space-y-8">
-												{outline.sections[currentSectionIndex].items.map(
-													(item, j) => (
+					{/* Title Selection View */}
+					{viewMode === 'titles' && (
+						<div className="bg-white min-h-screen">
+							{outline?.sections?.length ? (
+								<div>
+									<div className="bg-black text-white p-6 text-center">
+										<h2 className="text-2xl font-normal text-white">
+											{videoTitle || 'Choose a Topic'}
+										</h2>
+									</div>
+									<div>
+										{outline.sections.map((section, index) => (
+											<div key={index}>
+												<div
+													className={`transition-colors ${
+														getCurrentActiveContent.sectionIndex === index
+															? 'bg-black text-white'
+															: 'hover:bg-gray-50'
+													}`}
+												>
+													<div className="max-w-2xl mx-auto px-6">
 														<button
-															key={j}
 															type="button"
-															onClick={() => jumpTo(item.start)}
-															className="w-full text-left group"
+															onClick={() => selectTitle(index)}
+															className="w-full text-left py-6 px-0"
 														>
-															<div className="pb-6 border-b border-gray-100 hover:border-gray-200 transition-colors">
-																<div className="flex items-start justify-between gap-6 mb-3">
-																	<h3 className="text-lg font-normal text-black">
-																		{item.title}
+															<div className="flex items-start gap-4">
+																<span
+																	className={`text-2xl font-normal min-w-[2rem] ${
+																		getCurrentActiveContent.sectionIndex ===
+																		index
+																			? 'text-white'
+																			: 'text-black'
+																	}`}
+																>
+																	{index + 1}.
+																</span>
+																<div className="flex-1">
+																	<h3
+																		className={`text-xl font-normal mb-2 ${
+																			getCurrentActiveContent.sectionIndex ===
+																			index
+																				? 'text-white'
+																				: 'text-black'
+																		}`}
+																	>
+																		{section.title}
 																	</h3>
-																	<span className="text-sm text-gray-400 mt-1">
-																		{formatRange(item.start, item.end)}
-																	</span>
+																	<div className="flex items-center justify-between">
+																		<span
+																			className={`text-sm ${
+																				getCurrentActiveContent.sectionIndex ===
+																				index
+																					? 'text-gray-300'
+																					: 'text-gray-400'
+																			}`}
+																		>
+																			{formatRange(section.start, section.end)}
+																		</span>
+																		<span
+																			className={`text-sm ${
+																				getCurrentActiveContent.sectionIndex ===
+																				index
+																					? 'text-gray-300'
+																					: 'text-gray-400'
+																			}`}
+																		>
+																			{section.items?.length || 0} insights
+																		</span>
+																	</div>
 																</div>
-																{item.summary && (
-																	<p className="text-gray-600 leading-relaxed">
-																		{item.summary}
-																	</p>
-																)}
 															</div>
 														</button>
-													)
+													</div>
+												</div>
+												{index < outline.sections.length - 1 && (
+													<div className="border-b border-black w-full"></div>
 												)}
 											</div>
-										)}
+										))}
 									</div>
-								)}
-							</div>
-						) : (
-							<div className="text-center py-16 text-gray-400">
-								<p>No clips available.</p>
+								</div>
+							) : (
+								<div className="min-h-screen flex items-center justify-center">
+									<p className="text-gray-400">No insights available.</p>
+								</div>
+							)}
+						</div>
+					)}
+
+					{/* Insights List View */}
+					{viewMode === 'insights-list' &&
+						selectedSectionIndex !== null &&
+						outline?.sections?.[selectedSectionIndex] && (
+							<div className="bg-white min-h-screen">
+								{(() => {
+									const section = outline.sections[selectedSectionIndex];
+									return (
+										<div>
+											<div className="bg-black text-white p-6 text-center">
+												<h2 className="text-2xl font-normal text-white mb-2">
+													{section.title}
+												</h2>
+											</div>
+											<div>
+												{section.items?.length ? (
+													section.items.map((item, index) => (
+														<div key={index}>
+															<div
+																className={`transition-colors ${
+																	getCurrentActiveContent.sectionIndex ===
+																		selectedSectionIndex &&
+																	getCurrentActiveContent.itemIndex === index
+																		? 'bg-black text-white'
+																		: 'hover:bg-gray-50'
+																}`}
+															>
+																<div className="max-w-2xl mx-auto px-6">
+																	<button
+																		type="button"
+																		onClick={() =>
+																			selectInsight(selectedSectionIndex, index)
+																		}
+																		className="w-full text-left py-6 px-0"
+																	>
+																		<div className="flex items-start gap-4">
+																			<span
+																				className={`text-2xl font-normal min-w-[2rem] ${
+																					getCurrentActiveContent.sectionIndex ===
+																						selectedSectionIndex &&
+																					getCurrentActiveContent.itemIndex ===
+																						index
+																						? 'text-white'
+																						: 'text-black'
+																				}`}
+																			>
+																				{index + 1}.
+																			</span>
+																			<div className="flex-1">
+																				<h3
+																					className={`text-xl font-normal mb-2 ${
+																						getCurrentActiveContent.sectionIndex ===
+																							selectedSectionIndex &&
+																						getCurrentActiveContent.itemIndex ===
+																							index
+																							? 'text-white'
+																							: 'text-black'
+																					}`}
+																				>
+																					{item.title}
+																				</h3>
+																				<div className="flex items-center justify-between mb-2">
+																					<span
+																						className={`text-sm ${
+																							getCurrentActiveContent.sectionIndex ===
+																								selectedSectionIndex &&
+																							getCurrentActiveContent.itemIndex ===
+																								index
+																								? 'text-gray-300'
+																								: 'text-gray-400'
+																						}`}
+																					>
+																						{formatRange(item.start, item.end)}
+																					</span>
+																				</div>
+																				{item.summary && (
+																					<p
+																						className={`text-sm leading-relaxed ${
+																							getCurrentActiveContent.sectionIndex ===
+																								selectedSectionIndex &&
+																							getCurrentActiveContent.itemIndex ===
+																								index
+																								? 'text-gray-300'
+																								: 'text-gray-600'
+																						}`}
+																					>
+																						{item.summary}
+																					</p>
+																				)}
+																			</div>
+																		</div>
+																	</button>
+																</div>
+															</div>
+															{index < section.items.length - 1 && (
+																<div className="border-b border-black w-full"></div>
+															)}
+														</div>
+													))
+												) : (
+													<div className="min-h-screen flex items-center justify-center">
+														<p className="text-gray-400">
+															No insights available for this topic.
+														</p>
+													</div>
+												)}
+											</div>
+										</div>
+									);
+								})()}
 							</div>
 						)}
-					</div>
-				</div>
-			)}
 
-			{/* Fixed Progress Bar at Bottom */}
-			{transcript && outline?.sections?.length && (
-				<div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-sm border-t border-gray-100 px-6 py-4">
-					<div className="flex items-center justify-center gap-1 mb-2">
-						{outline.sections.map((_, idx) => (
-							<button
-								key={idx}
-								onClick={() => navigateToSection(idx)}
-								className={`h-1 rounded-full transition-all ${
-									idx === currentSectionIndex
-										? 'bg-black w-8'
-										: 'bg-gray-200 w-1 hover:bg-gray-300'
-								}`}
-							/>
-						))}
-					</div>
-					<div className="text-xs text-gray-400 text-center">
-						{currentSectionIndex + 1} of {outline.sections.length}
-					</div>
+					{/* Individual Insight View - Swipeable */}
+					{viewMode === 'individual' && outline?.sections?.length && (
+						<div
+							className="bg-white relative overflow-hidden"
+							style={{ height: 'calc(100vh - 56.25vw - 60px)' }}
+						>
+							{/* Swipe Indicators */}
+							<div className="absolute left-4 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center space-y-2">
+								<div
+									className={`transition-all duration-300 ${
+										swipeDirection === 'down'
+											? 'scale-125 text-black'
+											: 'text-gray-300'
+									}`}
+								>
+									<svg
+										className="w-6 h-6"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d="M5 15l7-7 7 7"
+										/>
+									</svg>
+								</div>
+								<div className="text-xs text-gray-400 font-medium">SWIPE</div>
+								<div
+									className={`transition-all duration-300 ${
+										swipeDirection === 'up'
+											? 'scale-125 text-black'
+											: 'text-gray-300'
+									}`}
+								>
+									<svg
+										className="w-6 h-6"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d="M19 9l-7 7-7-7"
+										/>
+									</svg>
+								</div>
+							</div>
+
+							{/* Navigation Progress Bar on the right */}
+							<div className="absolute right-4 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center">
+								<div
+									className={`h-48 w-1 bg-gray-200 rounded-full relative transition-all duration-200 ${
+										isDragging ? 'scale-110' : ''
+									}`}
+								>
+									{/* Progress fill */}
+									<div
+										className="rounded-full w-full transition-all duration-300 ease-out bg-black"
+										style={{
+											height: `${getVideoProgress}%`,
+											transition: 'height 0.3s ease-out',
+										}}
+									/>
+									{/* Current position indicator */}
+									<div
+										className={`absolute w-3 h-3 rounded-full -left-1 transform -translate-y-1/2 transition-all duration-300 bg-black ${
+											isDragging ? 'scale-125' : ''
+										}`}
+										style={{
+											top: `${getVideoProgress}%`,
+										}}
+									/>
+								</div>
+								<div
+									className={`text-xs font-medium mt-2 transition-colors duration-200 ${
+										isDragging ? 'text-black' : 'text-gray-400'
+									}`}
+								>
+									{Math.round(getVideoProgress)}%
+								</div>
+							</div>
+
+							{(() => {
+								const activeContent = getCurrentActiveContent;
+
+								// Always show content from the currently playing section
+								const currentlyPlayingSection =
+									outline.sections[activeContent.sectionIndex];
+								let currentItem = null;
+								let currentSectionTitle = '';
+
+								if (currentlyPlayingSection) {
+									currentSectionTitle = currentlyPlayingSection.title;
+
+									// If there's a specific item playing, show it
+									if (
+										activeContent.itemIndex >= 0 &&
+										currentlyPlayingSection.items?.[activeContent.itemIndex]
+									) {
+										currentItem =
+											currentlyPlayingSection.items[activeContent.itemIndex];
+									} else if (currentlyPlayingSection.items?.length) {
+										// Otherwise show the first item of the current section
+										currentItem = currentlyPlayingSection.items[0];
+									}
+								}
+
+								return (
+									<div className="h-full flex flex-col">
+										{/* Fixed Title at Top - Stays in place */}
+										<div className="bg-black text-white p-6 relative z-20">
+											<h2 className="text-2xl font-normal leading-tight text-center">
+												{currentSectionTitle}
+											</h2>
+										</div>
+
+										{/* Scrollable Content Area Behind Title */}
+										<div
+											className="flex-1 relative overflow-hidden"
+											onTouchStart={onTouchStart}
+											onTouchMove={onTouchMove}
+											onTouchEnd={onTouchEnd}
+										>
+											<div
+												className="h-full transition-transform duration-200 ease-out"
+												style={{
+													transform: isDragging
+														? `translateY(${-dragOffset}px) scale(${
+																1 + Math.abs(dragOffset) * 0.001
+														  })`
+														: 'translateY(0) scale(1)',
+												}}
+											>
+												<div className="flex items-center justify-center px-6 h-full relative">
+													{/* Swipe hint on first load */}
+													{!isDragging && getCurrentFlatIndex === 0 && (
+														<div className="absolute top-8 left-1/2 transform -translate-x-1/2 bg-black/10 text-black px-4 py-2 rounded-full text-sm animate-pulse">
+															👆 Swipe up/down for more insights
+														</div>
+													)}
+
+													{currentItem ? (
+														<div className="w-full max-w-2xl">
+															<button
+																type="button"
+																onClick={() => {
+																	// Only jump if this item is not already playing
+																	const activeContent = getCurrentActiveContent;
+																	const currentSectionIndex =
+																		activeContent.sectionIndex;
+																	const currentItemIndex =
+																		activeContent.itemIndex;
+
+																	// Check if the displayed item is the currently playing item
+																	const isCurrentlyPlaying =
+																		currentlyPlayingSection?.items?.[
+																			currentItemIndex
+																		] === currentItem;
+
+																	if (
+																		!isCurrentlyPlaying &&
+																		currentItem?.start
+																	) {
+																		jumpTo(currentItem.start);
+																	}
+																}}
+																className="w-full group"
+															>
+																<div className="p-8 transition-all">
+																	<div className="text-center mb-4">
+																		<h3 className="text-2xl font-normal mb-3 text-black">
+																			{currentItem.title}
+																		</h3>
+																		<span className="text-sm text-gray-400">
+																			{formatRange(
+																				currentItem.start,
+																				currentItem.end
+																			)}
+																		</span>
+																	</div>
+																	{currentItem.summary && (
+																		<p className="leading-relaxed text-center text-lg text-gray-600">
+																			{currentItem.summary}
+																		</p>
+																	)}
+																</div>
+															</button>
+														</div>
+													) : (
+														<div className="text-center text-gray-400">
+															<p>No insights available for this section</p>
+														</div>
+													)}
+												</div>
+											</div>
+										</div>
+									</div>
+								);
+							})()}
+						</div>
+					)}
 				</div>
 			)}
 		</div>
