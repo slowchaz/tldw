@@ -74,9 +74,63 @@ export default function Home() {
 	const [segments, setSegments] = useState<TranscriptSegment[]>([]);
 	const [outline, setOutline] = useState<OutlineResponse | null>(null);
 	const [outlineLoading, setOutlineLoading] = useState(false);
+	const [fromCache, setFromCache] = useState({
+		transcript: false,
+		outline: false,
+	});
 
 	const playerRef = useRef<any | null>(null);
 	const apiReadyPromiseRef = useRef<Promise<void> | null>(null);
+
+	// Cache utility functions
+	const getCachedTranscript = (videoId: string) => {
+		try {
+			const cached = localStorage.getItem(`transcript_${videoId}`);
+			return cached ? JSON.parse(cached) : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const setCachedTranscript = (
+		videoId: string,
+		data: { segments: TranscriptSegment[] }
+	) => {
+		try {
+			localStorage.setItem(`transcript_${videoId}`, JSON.stringify(data));
+		} catch {
+			// Ignore storage errors
+		}
+	};
+
+	const getCachedOutline = (videoId: string) => {
+		try {
+			const cached = localStorage.getItem(`outline_${videoId}`);
+			return cached ? JSON.parse(cached) : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const setCachedOutline = (videoId: string, data: OutlineResponse) => {
+		try {
+			localStorage.setItem(`outline_${videoId}`, JSON.stringify(data));
+		} catch {
+			// Ignore storage errors
+		}
+	};
+
+	const clearCache = () => {
+		try {
+			const keys = Object.keys(localStorage).filter(
+				(key) => key.startsWith('transcript_') || key.startsWith('outline_')
+			);
+			keys.forEach((key) => localStorage.removeItem(key));
+			setFromCache({ transcript: false, outline: false });
+		} catch {
+			// Ignore storage errors
+		}
+	};
 
 	const ensureYouTubeIframeAPI = () => {
 		if (typeof window === 'undefined') return Promise.resolve();
@@ -122,8 +176,28 @@ export default function Home() {
 		setTranscript('');
 		setSegments([]);
 		setOutline(null);
+		setFromCache({ transcript: false, outline: false });
 		const parsedId = getYouTubeVideoId(url.trim());
 		setVideoId(parsedId || '');
+
+		// Check cache first
+		if (parsedId) {
+			const cachedTranscript = getCachedTranscript(parsedId);
+			if (cachedTranscript && Array.isArray(cachedTranscript.segments)) {
+				console.log('Loading transcript from cache for video:', parsedId);
+				setSegments(cachedTranscript.segments);
+				setTranscript(
+					cachedTranscript.segments
+						.map((s: TranscriptSegment) => s.text)
+						.join('\n')
+				);
+				setFromCache((prev) => ({ ...prev, transcript: true }));
+				setLoading(false);
+				// Process outline (which will also check cache)
+				void processOutline(cachedTranscript.segments, parsedId);
+				return;
+			}
+		}
 
 		try {
 			const response = await fetch('/api/transcript', {
@@ -138,12 +212,22 @@ export default function Home() {
 
 			if (data.success) {
 				if (Array.isArray(data.segments)) {
-					setSegments(data.segments as TranscriptSegment[]);
-					setTranscript(
-						(data.segments as TranscriptSegment[]).map((s) => s.text).join('\n')
-					);
+					const transcriptData = {
+						segments: data.segments as TranscriptSegment[],
+					};
+					setSegments(transcriptData.segments);
+					setTranscript(transcriptData.segments.map((s) => s.text).join('\n'));
+
+					// Cache the transcript data
+					if (data.videoId || parsedId) {
+						setCachedTranscript(data.videoId || parsedId!, transcriptData);
+					}
+
 					// Kick off processing to outline with the received segments
-					void processOutline(data.segments as TranscriptSegment[]);
+					void processOutline(
+						transcriptData.segments,
+						data.videoId || parsedId
+					);
 				}
 				if (data.videoId) {
 					setVideoId(data.videoId);
@@ -158,9 +242,26 @@ export default function Home() {
 		}
 	};
 
-	const processOutline = async (currentSegments: TranscriptSegment[]) => {
+	const processOutline = async (
+		currentSegments: TranscriptSegment[],
+		currentVideoId?: string
+	) => {
 		if (!currentSegments?.length) return;
 		setOutlineLoading(true);
+
+		// Check cache first if we have a videoId
+		const videoIdToUse = currentVideoId || videoId;
+		if (videoIdToUse) {
+			const cachedOutline = getCachedOutline(videoIdToUse);
+			if (cachedOutline && Array.isArray(cachedOutline.sections)) {
+				console.log('Loading outline from cache for video:', videoIdToUse);
+				setOutline(cachedOutline);
+				setFromCache((prev) => ({ ...prev, outline: true }));
+				setOutlineLoading(false);
+				return;
+			}
+		}
+
 		try {
 			const res = await fetch('/api/process-transcript', {
 				method: 'POST',
@@ -169,7 +270,13 @@ export default function Home() {
 			});
 			const data = await res.json();
 			if (data?.success && data?.outline?.sections) {
-				setOutline(data.outline as OutlineResponse);
+				const outlineData = data.outline as OutlineResponse;
+				setOutline(outlineData);
+
+				// Cache the outline data
+				if (videoIdToUse) {
+					setCachedOutline(videoIdToUse, outlineData);
+				}
 			} else {
 				// Keep UI minimal; surface a generic error
 				// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
@@ -269,13 +376,22 @@ export default function Home() {
 						/>
 					</div>
 
-					<button
-						onClick={extractTranscript}
-						disabled={loading}
-						className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-					>
-						{loading ? 'Extracting...' : 'Extract Transcript'}
-					</button>
+					<div className="flex gap-2">
+						<button
+							onClick={extractTranscript}
+							disabled={loading}
+							className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+						>
+							{loading ? 'Extracting...' : 'Extract Transcript'}
+						</button>
+						{fromCache.transcript && (
+							<div className="flex items-center px-3 bg-green-50 border border-green-200 rounded-lg">
+								<span className="text-sm text-green-700">
+									Loaded from cache
+								</span>
+							</div>
+						)}
+					</div>
 				</div>
 
 				{error && (
@@ -285,100 +401,102 @@ export default function Home() {
 				)}
 
 				{transcript && (
-					<div className="space-y-4">
+					<div className="space-y-6">
 						<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+							{/* Video Player */}
 							<div className="w-full">
 								<div className="w-full aspect-video bg-black rounded-lg overflow-hidden">
 									<div id="player" className="w-full h-full" />
 								</div>
 							</div>
+
+							{/* Outline */}
 							<div>
-								{/* Outline */}
-								<div className="space-y-4">
-									<div className="flex items-center justify-between">
-										<h2 className="text-2xl font-semibold text-gray-900">
+								<div className="flex items-center justify-between mb-4">
+									<div className="flex items-center gap-3">
+										<h2 className="text-xl font-semibold text-gray-900">
 											Outline
 										</h2>
-										{outlineLoading && (
-											<span className="text-sm text-gray-500">Processing…</span>
+										{fromCache.outline && (
+											<span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+												Cached
+											</span>
 										)}
 									</div>
-									{outline?.sections?.length ? (
-										<div className="space-y-4">
-											{outline.sections.map((section, idx) => (
-												<div
-													key={idx}
-													className="relative rounded-xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow group overflow-hidden"
-												>
-													<div className="absolute left-0 top-0 h-full w-1.5 bg-gradient-to-b from-blue-500/90 to-blue-400/60" />
-													<button
-														type="button"
-														onClick={() => jumpTo(section.start)}
-														className="w-full text-left px-4 pt-3 pb-2 flex items-start justify-between gap-3"
-													>
-														<div className="min-w-0">
-															<div className="flex items-center gap-2">
-																<span className="inline-flex items-center justify-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
-																	S{idx + 1}
-																</span>
-																<h3 className="font-semibold text-gray-900 truncate">
-																	{section.title}
-																</h3>
-															</div>
-														</div>
-														<span className="shrink-0 inline-flex items-center text-[11px] font-medium text-gray-700 bg-gray-100 rounded-full px-2 py-0.5">
-															{formatRange(section.start, section.end)}
-														</span>
-													</button>
-													{!!section.items?.length && (
-														<ul className="px-2 pb-2">
-															{section.items.map((item, j) => (
-																<li key={j} className="">
-																	<button
-																		type="button"
-																		onClick={() => jumpTo(item.start)}
-																		className="w-full text-left rounded-lg px-2 py-2 hover:bg-gray-50 transition flex items-start gap-2"
-																	>
-																		<span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500/70" />
-																		<div className="min-w-0 flex-1">
-																			<div className="flex items-center justify-between gap-3">
-																				<p className="text-sm font-medium text-gray-900 truncate">
-																					{item.title}
-																				</p>
-																				<span className="shrink-0 inline-flex items-center text-[10px] font-medium text-gray-700 bg-gray-100 rounded-full px-1.5 py-0.5">
-																					{formatRange(item.start, item.end)}
-																				</span>
-																			</div>
-																			{item.summary && (
-																				<p className="mt-0.5 text-xs text-gray-600 line-clamp-2">
-																					{item.summary}
-																				</p>
-																			)}
-																		</div>
-																	</button>
-																</li>
-															))}
-														</ul>
-													)}
-												</div>
-											))}
-										</div>
-									) : (
-										<p className="text-sm text-gray-500">
-											No outline available.
-										</p>
-									)}
+									<div className="flex items-center gap-2">
+										{outlineLoading && (
+											<span className="text-sm text-gray-500">
+												Processing...
+											</span>
+										)}
+										{(fromCache.transcript || fromCache.outline) && (
+											<button
+												onClick={clearCache}
+												className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded transition-colors"
+												title="Clear cached data"
+											>
+												Clear Cache
+											</button>
+										)}
+									</div>
 								</div>
 
-								{/* Transcript */}
-								<h2 className="text-2xl font-semibold text-gray-900 mt-6 mb-2">
-									Transcript
-								</h2>
-								<div className="p-4 bg-gray-50 border border-gray-200 rounded-lg max-h-[40vh] overflow-auto">
-									<p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
-										{transcript}
-									</p>
-								</div>
+								{outline?.sections?.length ? (
+									<div className="space-y-3">
+										{outline.sections.map((section, idx) => (
+											<div
+												key={idx}
+												className="border border-gray-200 rounded-lg bg-white"
+											>
+												<button
+													type="button"
+													onClick={() => jumpTo(section.start)}
+													className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
+												>
+													<div className="flex items-center justify-between gap-3 mb-2">
+														<h3 className="font-medium text-gray-900">
+															{section.title}
+														</h3>
+														<span className="text-sm text-gray-500 bg-gray-100 rounded px-2 py-1">
+															{formatRange(section.start, section.end)}
+														</span>
+													</div>
+												</button>
+
+												{!!section.items?.length && (
+													<div className="px-4 pb-4 space-y-2">
+														{section.items.map((item, j) => (
+															<button
+																key={j}
+																type="button"
+																onClick={() => jumpTo(item.start)}
+																className="w-full text-left p-3 hover:bg-gray-50 rounded border border-gray-100"
+															>
+																<div className="flex items-center justify-between gap-3">
+																	<span className="text-sm text-gray-800">
+																		{item.title}
+																	</span>
+																	<span className="text-xs text-gray-500">
+																		{formatRange(item.start, item.end)}
+																	</span>
+																</div>
+																{item.summary && (
+																	<p className="text-xs text-gray-600 mt-1">
+																		{item.summary}
+																	</p>
+																)}
+															</button>
+														))}
+													</div>
+												)}
+											</div>
+										))}
+									</div>
+								) : (
+									<div className="text-center py-8 text-gray-500">
+										<p>No outline available.</p>
+									</div>
+								)}
 							</div>
 						</div>
 					</div>
