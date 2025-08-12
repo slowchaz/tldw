@@ -722,6 +722,8 @@ export default function Home() {
 						modestbranding: 1,
 						rel: 0,
 						playsinline: 1,
+						cc_load_policy: 1, // Force captions to show by default
+						hl: 'en', // Set the interface language (optional)
 					},
 					events: {
 						onReady: () => {
