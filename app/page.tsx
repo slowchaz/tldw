@@ -78,6 +78,13 @@ export default function Home() {
 		transcript: false,
 		outline: false,
 	});
+	const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+	const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(
+		null
+	);
+	const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(
+		null
+	);
 
 	const playerRef = useRef<any | null>(null);
 	const apiReadyPromiseRef = useRef<Promise<void> | null>(null);
@@ -318,6 +325,60 @@ export default function Home() {
 		return `${formatSeconds(start)}`;
 	};
 
+	// Swipe functionality
+	const minSwipeDistance = 50;
+
+	const onTouchStart = (e: React.TouchEvent) => {
+		setTouchEnd(null);
+		setTouchStart({
+			x: e.targetTouches[0].clientX,
+			y: e.targetTouches[0].clientY,
+		});
+	};
+
+	const onTouchMove = (e: React.TouchEvent) => {
+		setTouchEnd({
+			x: e.targetTouches[0].clientX,
+			y: e.targetTouches[0].clientY,
+		});
+	};
+
+	const onTouchEnd = () => {
+		if (!touchStart || !touchEnd) return;
+
+		const distanceX = touchStart.x - touchEnd.x;
+		const distanceY = touchStart.y - touchEnd.y;
+		const isVerticalSwipe = Math.abs(distanceY) > Math.abs(distanceX);
+
+		if (isVerticalSwipe && Math.abs(distanceY) > minSwipeDistance) {
+			if (distanceY > 0) {
+				// Swipe up - next section
+				navigateToSection(currentSectionIndex + 1);
+			} else {
+				// Swipe down - previous section
+				navigateToSection(currentSectionIndex - 1);
+			}
+		}
+	};
+
+	const navigateToSection = (index: number) => {
+		if (!outline?.sections?.length) return;
+
+		const newIndex = Math.max(0, Math.min(index, outline.sections.length - 1));
+		setCurrentSectionIndex(newIndex);
+
+		// Auto-jump to the section's timestamp
+		const section = outline.sections[newIndex];
+		if (section?.start) {
+			jumpTo(section.start);
+		}
+	};
+
+	// Reset section index when outline changes
+	useEffect(() => {
+		setCurrentSectionIndex(0);
+	}, [outline]);
+
 	useEffect(() => {
 		if (!transcript || !videoId) return;
 		let cancelled = false;
@@ -346,176 +407,200 @@ export default function Home() {
 	}, [transcript, videoId]);
 
 	return (
-		<div className="font-sans min-h-screen p-8 max-w-5xl mx-auto">
-			<main className="space-y-8">
-				<div className="text-center">
-					<h1 className="text-4xl font-bold text-gray-900 mb-4">
-						TLDW - Too Long; Didn&apos;t Watch
-					</h1>
-					<p className="text-lg text-gray-600">
-						Extract transcripts from YouTube videos using yt-dlp
-					</p>
-				</div>
+		<div className="font-sans min-h-screen bg-black">
+			{/* Input Section - Only shown when no transcript */}
+			{!transcript && (
+				<div className="bg-white min-h-screen flex items-center justify-center">
+					<div className="w-full max-w-sm px-6">
+						<div className="text-center mb-12">
+							<h1 className="text-3xl font-normal text-black mb-3">TLDW</h1>
+							<p className="text-gray-500">
+								Turn long videos into digestible clips
+							</p>
+						</div>
 
-				<div className="space-y-4">
-					<div>
-						<label
-							htmlFor="url"
-							className="block text-sm font-medium text-gray-700 mb-2"
-						>
-							YouTube URL or Video ID
-						</label>
-						<input
-							id="url"
-							type="text"
-							value={url}
-							onChange={(e) => setUrl(e.target.value)}
-							placeholder="https://www.youtube.com/watch?v=pzBi1nwDn8U or pzBi1nwDn8U"
-							className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-							disabled={loading}
-						/>
-					</div>
+						<div className="space-y-6">
+							<input
+								id="url"
+								type="text"
+								value={url}
+								onChange={(e) => setUrl(e.target.value)}
+								placeholder="YouTube URL"
+								className="w-full px-0 py-4 border-0 border-b border-gray-200 focus:border-black focus:outline-none text-base bg-transparent"
+								disabled={loading}
+							/>
 
-					<div className="flex gap-2">
-						<button
-							onClick={extractTranscript}
-							disabled={loading}
-							className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-						>
-							{loading ? 'Extracting...' : 'Extract Transcript'}
-						</button>
-						{fromCache.transcript && (
-							<div className="flex items-center px-3 bg-green-50 border border-green-200 rounded-lg">
-								<span className="text-sm text-green-700">
-									Loaded from cache
-								</span>
+							<button
+								onClick={extractTranscript}
+								disabled={loading}
+								className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-400 text-white font-normal py-4 transition-colors text-base"
+							>
+								{loading ? 'Processing...' : 'Get Clips'}
+							</button>
+
+							{fromCache.transcript && (
+								<div className="text-center">
+									<span className="text-xs text-gray-500">
+										Loaded from cache
+									</span>
+								</div>
+							)}
+						</div>
+
+						{error && (
+							<div className="mt-6 text-center">
+								<p className="text-red-500 text-sm">{error}</p>
 							</div>
 						)}
 					</div>
 				</div>
+			)}
 
-				{error && (
-					<div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-						<p className="text-red-600">{error}</p>
-					</div>
-				)}
+			{/* Main Content - Video + Clips */}
+			{transcript && (
+				<div className="relative">
+					{/* Fixed Video Player at Top */}
+					<div className="sticky top-0 z-10 bg-black">
+						<div className="w-full aspect-video">
+							<div id="player" className="w-full h-full" />
+						</div>
 
-				{transcript && (
-					<div className="space-y-6">
-						<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-							{/* Video Player */}
-							<div className="w-full">
-								<div className="w-full aspect-video bg-black rounded-lg overflow-hidden">
-									<div id="player" className="w-full h-full" />
+						{/* Video Controls/Info Bar */}
+						<div className="bg-black border-b border-gray-900 px-6 py-3">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-3">
+									{fromCache.outline && (
+										<span className="text-xs text-gray-500">Cached</span>
+									)}
+									{outlineLoading && (
+										<span className="text-xs text-gray-500">Processing...</span>
+									)}
+								</div>
+								<div className="flex items-center gap-4">
+									{(fromCache.transcript || fromCache.outline) && (
+										<button
+											onClick={clearCache}
+											className="text-xs text-gray-500 hover:text-white transition-colors"
+										>
+											Clear Cache
+										</button>
+									)}
+									<button
+										onClick={() => {
+											setTranscript('');
+											setSegments([]);
+											setOutline(null);
+											setVideoId('');
+											setUrl('');
+											setError('');
+											setFromCache({ transcript: false, outline: false });
+										}}
+										className="text-xs text-gray-500 hover:text-white transition-colors"
+									>
+										New Video
+									</button>
 								</div>
 							</div>
+						</div>
+					</div>
 
-							{/* Outline */}
-							<div>
-								<div className="flex items-center justify-between mb-4">
-									<div className="flex items-center gap-3">
-										<h2 className="text-xl font-semibold text-gray-900">
-											Outline
-										</h2>
-										{fromCache.outline && (
-											<span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-												Cached
-											</span>
-										)}
-									</div>
-									<div className="flex items-center gap-2">
-										{outlineLoading && (
-											<span className="text-sm text-gray-500">
-												Processing...
-											</span>
-										)}
-										{(fromCache.transcript || fromCache.outline) && (
-											<button
-												onClick={clearCache}
-												className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded transition-colors"
-												title="Clear cached data"
-											>
-												Clear Cache
-											</button>
-										)}
-									</div>
-								</div>
+					{/* Swipeable Clips Feed */}
+					<div className="bg-white min-h-screen">
+						{outline?.sections?.length ? (
+							<div
+								className="relative"
+								onTouchStart={onTouchStart}
+								onTouchMove={onTouchMove}
+								onTouchEnd={onTouchEnd}
+							>
+								{/* Current Section Display */}
+								{outline.sections[currentSectionIndex] && (
+									<div className="px-6 py-8 min-h-[80vh] pb-24">
+										{/* Section Header */}
+										<button
+											type="button"
+											onClick={() =>
+												jumpTo(outline.sections[currentSectionIndex].start)
+											}
+											className="w-full text-left mb-12 group"
+										>
+											<div className="flex items-start justify-between gap-6">
+												<h2 className="text-2xl font-normal text-black leading-tight">
+													{outline.sections[currentSectionIndex].title}
+												</h2>
+												<span className="text-sm text-gray-500 mt-1">
+													{formatRange(
+														outline.sections[currentSectionIndex].start,
+														outline.sections[currentSectionIndex].end
+													)}
+												</span>
+											</div>
+										</button>
 
-								{outline?.sections?.length ? (
-									<div className="space-y-3">
-										{outline.sections.map((section, idx) => (
-											<div
-												key={idx}
-												className="border border-gray-200 rounded-lg bg-white"
-											>
-												<button
-													type="button"
-													onClick={() => jumpTo(section.start)}
-													className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
-												>
-													<div className="flex items-center justify-between gap-3 mb-2">
-														<h3 className="font-medium text-gray-900">
-															{section.title}
-														</h3>
-														<span className="text-sm text-gray-500 bg-gray-100 rounded px-2 py-1">
-															{formatRange(section.start, section.end)}
-														</span>
-													</div>
-												</button>
-
-												{!!section.items?.length && (
-													<div className="px-4 pb-4 space-y-2">
-														{section.items.map((item, j) => (
-															<button
-																key={j}
-																type="button"
-																onClick={() => jumpTo(item.start)}
-																className="w-full text-left p-3 hover:bg-gray-50 rounded border border-gray-100"
-															>
-																<div className="flex items-center justify-between gap-3">
-																	<span className="text-sm text-gray-800">
+										{/* Section Items */}
+										{!!outline.sections[currentSectionIndex].items?.length && (
+											<div className="space-y-8">
+												{outline.sections[currentSectionIndex].items.map(
+													(item, j) => (
+														<button
+															key={j}
+															type="button"
+															onClick={() => jumpTo(item.start)}
+															className="w-full text-left group"
+														>
+															<div className="pb-6 border-b border-gray-100 hover:border-gray-200 transition-colors">
+																<div className="flex items-start justify-between gap-6 mb-3">
+																	<h3 className="text-lg font-normal text-black">
 																		{item.title}
-																	</span>
-																	<span className="text-xs text-gray-500">
+																	</h3>
+																	<span className="text-sm text-gray-400 mt-1">
 																		{formatRange(item.start, item.end)}
 																	</span>
 																</div>
 																{item.summary && (
-																	<p className="text-xs text-gray-600 mt-1">
+																	<p className="text-gray-600 leading-relaxed">
 																		{item.summary}
 																	</p>
 																)}
-															</button>
-														))}
-													</div>
+															</div>
+														</button>
+													)
 												)}
 											</div>
-										))}
-									</div>
-								) : (
-									<div className="text-center py-8 text-gray-500">
-										<p>No outline available.</p>
+										)}
 									</div>
 								)}
 							</div>
-						</div>
+						) : (
+							<div className="text-center py-16 text-gray-400">
+								<p>No clips available.</p>
+							</div>
+						)}
 					</div>
-				)}
-			</main>
+				</div>
+			)}
 
-			<footer className="mt-16 text-center">
-				<p className="text-gray-500">
-					Powered by{' '}
-					<a
-						href="https://github.com/yt-dlp/yt-dlp"
-						target="_blank"
-						rel="noopener noreferrer"
-						className="text-blue-600 hover:underline"
-					>
-						yt-dlp
-					</a>
-				</p>
-			</footer>
+			{/* Fixed Progress Bar at Bottom */}
+			{transcript && outline?.sections?.length && (
+				<div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-sm border-t border-gray-100 px-6 py-4">
+					<div className="flex items-center justify-center gap-1 mb-2">
+						{outline.sections.map((_, idx) => (
+							<button
+								key={idx}
+								onClick={() => navigateToSection(idx)}
+								className={`h-1 rounded-full transition-all ${
+									idx === currentSectionIndex
+										? 'bg-black w-8'
+										: 'bg-gray-200 w-1 hover:bg-gray-300'
+								}`}
+							/>
+						))}
+					</div>
+					<div className="text-xs text-gray-400 text-center">
+						{currentSectionIndex + 1} of {outline.sections.length}
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
