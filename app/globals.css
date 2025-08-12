@@ -3,12 +3,15 @@
 :root {
 	--background: #ffffff;
 	--foreground: #171717;
+	--accent: #ff6b35;
+	--accent-subtle: #fff5f2;
+	--grid-unit: 8px;
 }
 
 @theme inline {
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
-	--font-sans: var(--font-geist-sans);
+	--font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 	--font-mono: var(--font-geist-mono);
 }
 
@@ -16,11 +19,71 @@
 	:root {
 		--background: #0a0a0a;
 		--foreground: #ededed;
+		--accent-subtle: #1a0f0a;
 	}
 }
 
 body {
 	background: var(--background);
 	color: var(--foreground);
-	font-family: Arial, Helvetica, sans-serif;
+	font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+	letter-spacing: -0.01em;
+	line-height: 1.4;
+}
+
+/* Precise button styles */
+.btn-primary {
+	background: var(--foreground);
+	color: var(--background);
+	border: none;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-primary:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-primary:active {
+	transform: translateY(0);
+}
+
+/* Refined input styles */
+.input-minimal {
+	border: none;
+	border-bottom: 1px solid #e5e5e5;
+	background: transparent;
+	font-weight: 400;
+	letter-spacing: -0.01em;
+	transition: border-color 0.2s ease;
+}
+
+.input-minimal:focus {
+	outline: none;
+	border-bottom-color: var(--foreground);
+}
+
+/* Subtle accent for active elements */
+.accent-highlight {
+	position: relative;
+}
+
+.accent-highlight::before {
+	content: '';
+	position: absolute;
+	left: -12px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 3px;
+	height: 24px;
+	background: var(--accent);
+	border-radius: 2px;
+	opacity: 0;
+	transition: opacity 0.2s ease;
+}
+
+.accent-highlight.active::before {
+	opacity: 1;
 }

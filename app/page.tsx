@@ -96,13 +96,14 @@ export default function Home() {
 	const [swipeDirection, setSwipeDirection] = useState<'up' | 'down' | null>(
 		null
 	);
-	const [isDragging, setIsDragging] = useState(false);
-	const [dragOffset, setDragOffset] = useState(0);
+	const [isNavigating, setIsNavigating] = useState(false);
 
 	const playerRef = useRef<any | null>(null);
 	const apiReadyPromiseRef = useRef<Promise<void> | null>(null);
 	const [playerReady, setPlayerReady] = useState(false);
 	const pendingJumpRef = useRef<number | null>(null);
+	const touchStartTimeRef = useRef<number>(0);
+	const lastNavigationTimeRef = useRef<number>(0);
 
 	// Cache utility functions
 	const getCachedTranscript = (videoId: string) => {
@@ -365,8 +366,10 @@ export default function Home() {
 		return `${formatSeconds(start)}`;
 	};
 
-	// Swipe functionality
-	const minSwipeDistance = 30;
+	// Swipe functionality - Smooth immediate navigation
+	const minSwipeDistance = 15; // Lower threshold for more responsive navigation
+	const quickSwipeDistance = 8; // Ultra-quick swipe for fast gestures
+	const navigationDebounceMs = 100; // Reduced debounce for better responsiveness
 
 	const onTouchStart = (e: React.TouchEvent) => {
 		setTouchEnd(null);
@@ -374,13 +377,18 @@ export default function Home() {
 			x: e.targetTouches[0].clientX,
 			y: e.targetTouches[0].clientY,
 		});
-		setIsDragging(true);
-		setDragOffset(0);
 		setSwipeDirection(null);
+		setIsNavigating(false);
+		// Store timestamp for velocity calculation
+		touchStartTimeRef.current = Date.now();
 	};
 
 	const onTouchMove = (e: React.TouchEvent) => {
-		if (!touchStart) return;
+		if (!touchStart || isNavigating) return;
+
+		// Time-based debouncing to prevent rapid navigation
+		const now = Date.now();
+		if (now - lastNavigationTimeRef.current < navigationDebounceMs) return;
 
 		const currentTouch = {
 			x: e.targetTouches[0].clientX,
@@ -393,45 +401,51 @@ export default function Home() {
 		const distanceX = touchStart.x - currentTouch.x;
 		const isVerticalSwipe = Math.abs(distanceY) > Math.abs(distanceX);
 
-		if (isVerticalSwipe) {
-			// Limit drag to reasonable bounds with more responsive feedback
-			const maxDrag = 150;
-			const clampedOffset = Math.max(-maxDrag, Math.min(maxDrag, distanceY));
-			setDragOffset(clampedOffset);
+		// Calculate velocity for quick swipes
+		const currentTime = Date.now();
+		const timeElapsed = currentTime - touchStartTimeRef.current;
+		const velocity = timeElapsed > 0 ? Math.abs(distanceY) / timeElapsed : 0;
 
-			// Determine swipe direction with lower threshold for better feedback
-			if (Math.abs(distanceY) > 15) {
+		if (isVerticalSwipe) {
+			// Quick navigation for fast swipes or longer distances
+			const shouldNavigate =
+				Math.abs(distanceY) > minSwipeDistance ||
+				(Math.abs(distanceY) > quickSwipeDistance && velocity > 0.5);
+
+			if (shouldNavigate) {
+				// Record navigation time for debouncing
+				lastNavigationTimeRef.current = now;
+
+				// Simple immediate navigation
+				setIsNavigating(true);
+
+				if (distanceY > 0) {
+					// Swipe up - next item
+					setSwipeDirection('up');
+					navigateToFlatIndex(getCurrentFlatIndex + 1);
+				} else {
+					// Swipe down - previous item
+					setSwipeDirection('down');
+					navigateToFlatIndex(getCurrentFlatIndex - 1);
+				}
+
+				// Quick reset after brief delay
+				setTimeout(() => {
+					setIsNavigating(false);
+					setSwipeDirection(null);
+				}, 100);
+			} else if (Math.abs(distanceY) > 5) {
+				// Show direction hint for smaller movements
 				setSwipeDirection(distanceY > 0 ? 'up' : 'down');
 			}
 		}
 	};
 
 	const onTouchEnd = () => {
-		if (!touchStart || !touchEnd) {
-			setIsDragging(false);
-			setDragOffset(0);
+		// Clean up swipe direction if not navigating
+		if (!isNavigating) {
 			setSwipeDirection(null);
-			return;
 		}
-
-		const distanceX = touchStart.x - touchEnd.x;
-		const distanceY = touchStart.y - touchEnd.y;
-		const isVerticalSwipe = Math.abs(distanceY) > Math.abs(distanceX);
-
-		if (isVerticalSwipe && Math.abs(distanceY) > minSwipeDistance) {
-			if (distanceY > 0) {
-				// Swipe up - next item in flat navigation
-				navigateToFlatIndex(getCurrentFlatIndex + 1);
-			} else {
-				// Swipe down - previous item in flat navigation
-				navigateToFlatIndex(getCurrentFlatIndex - 1);
-			}
-		}
-
-		// Reset drag state
-		setIsDragging(false);
-		setDragOffset(0);
-		setSwipeDirection(null);
 	};
 
 	const navigateToSection = (index: number) => {
@@ -751,36 +765,42 @@ export default function Home() {
 			{/* Input Section - Only shown when no transcript */}
 			{!transcript && (
 				<div className="bg-white min-h-screen flex items-center justify-center">
-					<div className="w-full max-w-sm px-6">
-						<div className="text-center mb-12">
-							<h1 className="text-3xl font-normal text-black mb-3">TLDW</h1>
-							<p className="text-gray-500">
-								Turn long videos into digestible clips
+					<div className="w-full max-w-sm px-8">
+						<div className="text-center mb-16">
+							<h1 className="text-4xl font-bold text-black mb-4 tracking-tight">
+								TLDW
+							</h1>
+							<p className="text-gray-600 font-normal tracking-wide text-sm">
+								TURN LONG VIDEOS INTO DIGESTIBLE CLIPS
 							</p>
 						</div>
 
-						<div className="space-y-6">
-							<input
-								id="url"
-								type="text"
-								value={url}
-								onChange={(e) => setUrl(e.target.value)}
-								placeholder="YouTube URL"
-								className="w-full px-0 py-4 border-0 border-b border-gray-200 focus:border-black focus:outline-none text-base bg-transparent"
-								disabled={loading}
-							/>
+						<div className="space-y-8">
+							<div className="relative">
+								<input
+									id="url"
+									type="text"
+									value={url}
+									onChange={(e) => setUrl(e.target.value)}
+									placeholder="YouTube URL"
+									className="input-minimal w-full px-0 py-5 text-base font-normal"
+									disabled={loading}
+								/>
+								{/* Subtle focus indicator */}
+								<div className="absolute bottom-0 left-0 h-px bg-gray-900 scale-x-0 transition-transform duration-200 focus-within:scale-x-100"></div>
+							</div>
 
 							<button
 								onClick={extractTranscript}
 								disabled={loading}
-								className="w-full bg-black hover:bg-gray-800 disabled:bg-gray-400 text-white font-normal py-4 transition-colors text-base"
+								className="btn-primary w-full py-5 text-base font-medium tracking-wide"
 							>
-								{loading ? 'Processing...' : 'Get Clips'}
+								{loading ? 'PROCESSING...' : 'GET CLIPS'}
 							</button>
 
 							{fromCache.transcript && (
-								<div className="text-center">
-									<span className="text-xs text-gray-500">
+								<div className="text-center pt-2">
+									<span className="text-xs text-gray-500 font-medium tracking-wider uppercase">
 										Loaded from cache
 									</span>
 								</div>
@@ -788,8 +808,8 @@ export default function Home() {
 						</div>
 
 						{error && (
-							<div className="mt-6 text-center">
-								<p className="text-red-500 text-sm">{error}</p>
+							<div className="mt-8 text-center">
+								<p className="text-red-600 text-sm font-medium">{error}</p>
 							</div>
 						)}
 					</div>
@@ -806,10 +826,10 @@ export default function Home() {
 						</div>
 
 						{/* Video Controls/Info Bar */}
-						<div className="bg-black px-6 py-3">
+						<div className="bg-black px-8 py-4">
 							<div className="flex items-center justify-between">
-								<div className="flex items-center gap-3">
-									{/* TikTok-style back button - only show when not in title selection */}
+								<div className="flex items-center gap-4">
+									{/* Precise back button - only show when not in title selection */}
 									{viewMode !== 'titles' && (
 										<button
 											onClick={() => {
@@ -819,11 +839,11 @@ export default function Home() {
 													setViewMode('titles');
 												}
 											}}
-											className="p-2 -m-2 text-white hover:text-gray-300 transition-colors"
+											className="flex items-center justify-center w-8 h-8 text-white hover:text-gray-300 transition-all duration-150 hover:bg-white/10 rounded-full"
 											aria-label="Back"
 										>
 											<svg
-												className="w-6 h-6"
+												className="w-5 h-5"
 												fill="none"
 												stroke="currentColor"
 												viewBox="0 0 24 24"
@@ -831,24 +851,28 @@ export default function Home() {
 												<path
 													strokeLinecap="round"
 													strokeLinejoin="round"
-													strokeWidth={2}
+													strokeWidth={2.5}
 													d="M15 19l-7-7 7-7"
 												/>
 											</svg>
 										</button>
 									)}
 									{fromCache.outline && (
-										<span className="text-xs text-gray-500">Cached</span>
+										<span className="text-xs text-gray-400 font-medium tracking-wider uppercase">
+											Cached
+										</span>
 									)}
 									{outlineLoading && (
-										<span className="text-xs text-gray-500">Processing...</span>
+										<span className="text-xs text-gray-400 font-medium tracking-wider uppercase">
+											Processing...
+										</span>
 									)}
 								</div>
-								<div className="flex items-center gap-4">
+								<div className="flex items-center gap-6">
 									{(fromCache.transcript || fromCache.outline) && (
 										<button
 											onClick={clearCache}
-											className="text-xs text-gray-500 hover:text-white transition-colors"
+											className="text-xs text-gray-400 hover:text-white transition-colors font-medium tracking-wider uppercase"
 										>
 											Clear Cache
 										</button>
@@ -874,7 +898,7 @@ export default function Home() {
 											}
 											setPlayerReady(false);
 										}}
-										className="text-xs text-gray-500 hover:text-white transition-colors"
+										className="text-xs text-gray-400 hover:text-white transition-colors font-medium tracking-wider uppercase"
 									>
 										New Video
 									</button>
@@ -888,41 +912,41 @@ export default function Home() {
 						<div className="bg-white min-h-screen">
 							{outline?.sections?.length ? (
 								<div>
-									<div className="bg-black text-white p-6 text-center">
-										<h2 className="text-2xl font-normal text-white">
-											{videoTitle || 'Choose a Topic'}
+									<div className="bg-black text-white py-8 px-8 text-center">
+										<h2 className="text-2xl font-bold text-white tracking-tight">
+											{videoTitle || 'CHOOSE A TOPIC'}
 										</h2>
 									</div>
-									<div>
+									<div className="max-w-3xl mx-auto">
 										{outline.sections.map((section, index) => (
 											<div key={index}>
 												<div
-													className={`transition-colors ${
+													className={`group transition-all duration-200 ${
 														getCurrentActiveContent.sectionIndex === index
-															? 'bg-black text-white'
-															: 'hover:bg-gray-50'
+															? 'bg-black text-white accent-highlight active'
+															: 'hover:bg-gray-50 accent-highlight'
 													}`}
 												>
-													<div className="max-w-2xl mx-auto px-6">
+													<div className="px-8">
 														<button
 															type="button"
 															onClick={() => selectTitle(index)}
-															className="w-full text-left py-6 px-0"
+															className="w-full text-left py-8"
 														>
-															<div className="flex items-start gap-4">
+															<div className="flex items-start gap-6">
 																<span
-																	className={`text-2xl font-normal min-w-[2rem] ${
+																	className={`text-2xl font-medium min-w-[3rem] transition-colors ${
 																		getCurrentActiveContent.sectionIndex ===
 																		index
 																			? 'text-white'
-																			: 'text-black'
+																			: 'text-gray-400'
 																	}`}
 																>
-																	{index + 1}.
+																	{String(index + 1).padStart(2, '0')}.
 																</span>
-																<div className="flex-1">
+																<div className="flex-1 min-w-0">
 																	<h3
-																		className={`text-xl font-normal mb-2 ${
+																		className={`text-xl font-bold mb-3 leading-tight tracking-tight ${
 																			getCurrentActiveContent.sectionIndex ===
 																			index
 																				? 'text-white'
@@ -933,24 +957,24 @@ export default function Home() {
 																	</h3>
 																	<div className="flex items-center justify-between">
 																		<span
-																			className={`text-sm ${
+																			className={`text-xs font-medium tracking-wider uppercase ${
 																				getCurrentActiveContent.sectionIndex ===
 																				index
 																					? 'text-gray-300'
-																					: 'text-gray-400'
+																					: 'text-gray-500'
 																			}`}
 																		>
 																			{formatRange(section.start, section.end)}
 																		</span>
 																		<span
-																			className={`text-sm ${
+																			className={`text-xs font-medium tracking-wider uppercase ${
 																				getCurrentActiveContent.sectionIndex ===
 																				index
 																					? 'text-gray-300'
-																					: 'text-gray-400'
+																					: 'text-gray-500'
 																			}`}
 																		>
-																			{section.items?.length || 0} insights
+																			{section.items?.length || 0} Insights
 																		</span>
 																	</div>
 																</div>
@@ -959,7 +983,7 @@ export default function Home() {
 													</div>
 												</div>
 												{index < outline.sections.length - 1 && (
-													<div className="border-b border-black w-full"></div>
+													<div className="border-b border-black"></div>
 												)}
 											</div>
 										))}
@@ -967,7 +991,9 @@ export default function Home() {
 								</div>
 							) : (
 								<div className="min-h-screen flex items-center justify-center">
-									<p className="text-gray-400">No insights available.</p>
+									<p className="text-gray-400 font-medium tracking-wider uppercase text-sm">
+										No insights available.
+									</p>
 								</div>
 							)}
 						</div>
@@ -982,48 +1008,48 @@ export default function Home() {
 									const section = outline.sections[selectedSectionIndex];
 									return (
 										<div>
-											<div className="bg-black text-white p-6 text-center">
-												<h2 className="text-2xl font-normal text-white mb-2">
+											<div className="bg-black text-white py-8 px-8 text-center">
+												<h2 className="text-2xl font-bold text-white tracking-tight">
 													{section.title}
 												</h2>
 											</div>
-											<div>
+											<div className="max-w-3xl mx-auto">
 												{section.items?.length ? (
 													section.items.map((item, index) => (
 														<div key={index}>
 															<div
-																className={`transition-colors ${
+																className={`group transition-all duration-200 ${
 																	getCurrentActiveContent.sectionIndex ===
 																		selectedSectionIndex &&
 																	getCurrentActiveContent.itemIndex === index
-																		? 'bg-black text-white'
-																		: 'hover:bg-gray-50'
+																		? 'bg-black text-white accent-highlight active'
+																		: 'hover:bg-gray-50 accent-highlight'
 																}`}
 															>
-																<div className="max-w-2xl mx-auto px-6">
+																<div className="px-8">
 																	<button
 																		type="button"
 																		onClick={() =>
 																			selectInsight(selectedSectionIndex, index)
 																		}
-																		className="w-full text-left py-6 px-0"
+																		className="w-full text-left py-8"
 																	>
-																		<div className="flex items-start gap-4">
+																		<div className="flex items-start gap-6">
 																			<span
-																				className={`text-2xl font-normal min-w-[2rem] ${
+																				className={`text-2xl font-medium min-w-[3rem] transition-colors ${
 																					getCurrentActiveContent.sectionIndex ===
 																						selectedSectionIndex &&
 																					getCurrentActiveContent.itemIndex ===
 																						index
 																						? 'text-white'
-																						: 'text-black'
+																						: 'text-gray-400'
 																				}`}
 																			>
-																				{index + 1}.
+																				{String(index + 1).padStart(2, '0')}.
 																			</span>
-																			<div className="flex-1">
+																			<div className="flex-1 min-w-0">
 																				<h3
-																					className={`text-xl font-normal mb-2 ${
+																					className={`text-xl font-bold mb-3 leading-tight tracking-tight ${
 																						getCurrentActiveContent.sectionIndex ===
 																							selectedSectionIndex &&
 																						getCurrentActiveContent.itemIndex ===
@@ -1034,15 +1060,15 @@ export default function Home() {
 																				>
 																					{item.title}
 																				</h3>
-																				<div className="flex items-center justify-between mb-2">
+																				<div className="flex items-center justify-between mb-3">
 																					<span
-																						className={`text-sm ${
+																						className={`text-xs font-medium tracking-wider uppercase ${
 																							getCurrentActiveContent.sectionIndex ===
 																								selectedSectionIndex &&
 																							getCurrentActiveContent.itemIndex ===
 																								index
 																								? 'text-gray-300'
-																								: 'text-gray-400'
+																								: 'text-gray-500'
 																						}`}
 																					>
 																						{formatRange(item.start, item.end)}
@@ -1050,7 +1076,7 @@ export default function Home() {
 																				</div>
 																				{item.summary && (
 																					<p
-																						className={`text-sm leading-relaxed ${
+																						className={`text-sm leading-relaxed font-normal ${
 																							getCurrentActiveContent.sectionIndex ===
 																								selectedSectionIndex &&
 																							getCurrentActiveContent.itemIndex ===
@@ -1068,13 +1094,13 @@ export default function Home() {
 																</div>
 															</div>
 															{index < section.items.length - 1 && (
-																<div className="border-b border-black w-full"></div>
+																<div className="border-b border-black"></div>
 															)}
 														</div>
 													))
 												) : (
 													<div className="min-h-screen flex items-center justify-center">
-														<p className="text-gray-400">
+														<p className="text-gray-400 font-medium tracking-wider uppercase text-sm">
 															No insights available for this topic.
 														</p>
 													</div>
@@ -1093,16 +1119,16 @@ export default function Home() {
 							style={{ height: 'calc(100vh - 56.25vw - 60px)' }}
 						>
 							{/* Swipe Indicators */}
-							<div className="absolute left-4 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center space-y-2">
+							<div className="absolute left-6 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center space-y-3">
 								<div
-									className={`transition-all duration-300 ${
+									className={`transition-all duration-200 ${
 										swipeDirection === 'down'
-											? 'scale-125 text-black'
-											: 'text-gray-300'
+											? 'scale-110 text-black'
+											: 'text-gray-400'
 									}`}
 								>
 									<svg
-										className="w-6 h-6"
+										className="w-5 h-5"
 										fill="none"
 										stroke="currentColor"
 										viewBox="0 0 24 24"
@@ -1110,21 +1136,23 @@ export default function Home() {
 										<path
 											strokeLinecap="round"
 											strokeLinejoin="round"
-											strokeWidth={2}
+											strokeWidth={2.5}
 											d="M5 15l7-7 7 7"
 										/>
 									</svg>
 								</div>
-								<div className="text-xs text-gray-400 font-medium">SWIPE</div>
+								<div className="text-xs text-gray-400 font-medium tracking-wider">
+									SWIPE
+								</div>
 								<div
-									className={`transition-all duration-300 ${
+									className={`transition-all duration-200 ${
 										swipeDirection === 'up'
-											? 'scale-125 text-black'
-											: 'text-gray-300'
+											? 'scale-110 text-black'
+											: 'text-gray-400'
 									}`}
 								>
 									<svg
-										className="w-6 h-6"
+										className="w-5 h-5"
 										fill="none"
 										stroke="currentColor"
 										viewBox="0 0 24 24"
@@ -1132,7 +1160,7 @@ export default function Home() {
 										<path
 											strokeLinecap="round"
 											strokeLinejoin="round"
-											strokeWidth={2}
+											strokeWidth={2.5}
 											d="M19 9l-7 7-7-7"
 										/>
 									</svg>
@@ -1140,12 +1168,8 @@ export default function Home() {
 							</div>
 
 							{/* Navigation Progress Bar on the right */}
-							<div className="absolute right-4 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center">
-								<div
-									className={`h-48 w-1 bg-gray-200 rounded-full relative transition-all duration-200 ${
-										isDragging ? 'scale-110' : ''
-									}`}
-								>
+							<div className="absolute right-6 top-1/2 transform -translate-y-1/2 z-30 flex flex-col items-center">
+								<div className="h-48 w-1 bg-gray-200 rounded-full relative transition-all duration-150">
 									{/* Progress fill */}
 									<div
 										className="rounded-full w-full transition-all duration-300 ease-out bg-black"
@@ -1156,19 +1180,13 @@ export default function Home() {
 									/>
 									{/* Current position indicator */}
 									<div
-										className={`absolute w-3 h-3 rounded-full -left-1 transform -translate-y-1/2 transition-all duration-300 bg-black ${
-											isDragging ? 'scale-125' : ''
-										}`}
+										className="absolute w-3 h-3 rounded-full -left-1 transform -translate-y-1/2 transition-all duration-150 bg-black"
 										style={{
 											top: `${getVideoProgress}%`,
 										}}
 									/>
 								</div>
-								<div
-									className={`text-xs font-medium mt-2 transition-colors duration-200 ${
-										isDragging ? 'text-black' : 'text-gray-400'
-									}`}
-								>
+								<div className="text-xs font-medium mt-3 transition-colors duration-150 tracking-wider text-gray-400">
 									{Math.round(getVideoProgress)}%
 								</div>
 							</div>
@@ -1201,8 +1219,8 @@ export default function Home() {
 								return (
 									<div className="h-full flex flex-col">
 										{/* Fixed Title at Top - Stays in place */}
-										<div className="bg-black text-white p-6 relative z-20">
-											<h2 className="text-2xl font-normal leading-tight text-center">
+										<div className="bg-black text-white py-8 px-8 relative z-20">
+											<h2 className="text-2xl font-bold leading-tight text-center tracking-tight">
 												{currentSectionTitle}
 											</h2>
 										</div>
@@ -1215,20 +1233,21 @@ export default function Home() {
 											onTouchEnd={onTouchEnd}
 										>
 											<div
-												className="h-full transition-transform duration-200 ease-out"
+												className="h-full transition-all duration-150 ease-out"
 												style={{
-													transform: isDragging
-														? `translateY(${-dragOffset}px) scale(${
-																1 + Math.abs(dragOffset) * 0.001
-														  })`
-														: 'translateY(0) scale(1)',
+													transform: isNavigating
+														? swipeDirection === 'up'
+															? 'translateY(-20px)'
+															: 'translateY(20px)'
+														: 'translateY(0)',
+													opacity: isNavigating ? 0.7 : 1,
 												}}
 											>
 												<div className="flex items-center justify-center px-6 h-full relative">
 													{/* Swipe hint on first load */}
-													{!isDragging && getCurrentFlatIndex === 0 && (
-														<div className="absolute top-8 left-1/2 transform -translate-x-1/2 bg-black/10 text-black px-4 py-2 rounded-full text-sm animate-pulse">
-															👆 Swipe up/down for more insights
+													{!isNavigating && getCurrentFlatIndex === 0 && (
+														<div className="absolute top-8 left-1/2 transform -translate-x-1/2 bg-gray-100 text-gray-600 px-6 py-3 rounded-full text-xs font-medium tracking-wider uppercase animate-pulse">
+															Swipe for more insights
 														</div>
 													)}
 
@@ -1259,12 +1278,12 @@ export default function Home() {
 																}}
 																className="w-full group"
 															>
-																<div className="p-8 transition-all">
-																	<div className="text-center mb-4">
-																		<h3 className="text-2xl font-normal mb-3 text-black">
+																<div className="p-12 transition-all">
+																	<div className="text-center mb-6">
+																		<h3 className="text-3xl font-bold mb-4 text-black leading-tight tracking-tight">
 																			{currentItem.title}
 																		</h3>
-																		<span className="text-sm text-gray-400">
+																		<span className="text-xs text-gray-500 font-medium tracking-wider uppercase">
 																			{formatRange(
 																				currentItem.start,
 																				currentItem.end
@@ -1272,7 +1291,7 @@ export default function Home() {
 																		</span>
 																	</div>
 																	{currentItem.summary && (
-																		<p className="leading-relaxed text-center text-lg text-gray-600">
+																		<p className="leading-relaxed text-center text-lg text-gray-700 font-normal max-w-2xl mx-auto">
 																			{currentItem.summary}
 																		</p>
 																	)}
@@ -1281,7 +1300,9 @@ export default function Home() {
 														</div>
 													) : (
 														<div className="text-center text-gray-400">
-															<p>No insights available for this section</p>
+															<p className="font-medium tracking-wider uppercase text-sm">
+																No insights available for this section
+															</p>
 														</div>
 													)}
 												</div>
