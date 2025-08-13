@@ -321,7 +321,7 @@ function ContentView({
 					</div>
 				)}
 
-			{/* Individual Insight View - Mobile/Tablet Only */}
+			{/* Individual Insight View */}
 			{viewMode === 'individual' && outline?.sections?.length && (
 				<div className="h-full relative overflow-hidden">
 					{(() => {
@@ -351,89 +351,76 @@ function ContentView({
 
 						return (
 							<div className="h-full flex flex-col relative">
-								{/* Right Side Controls - Navigation & Progress Bar */}
-								<div className="absolute right-6 z-30 flex flex-col items-center top-1/2 -translate-y-1/2 lg:right-4">
-									{/* Navigation Indicators */}
-									<div className="flex flex-col items-center space-y-2 mb-6">
-										<button
-											type="button"
-											onClick={() =>
-												navigateToFlatIndex(getCurrentFlatIndex - 1)
-											}
-											className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 hover:bg-gray-100 ${
-												swipeDirection === 'down'
-													? 'scale-110 text-black'
-													: 'text-gray-400 hover:text-black'
-											}`}
-											aria-label="Previous insight"
+								{/* Swipe Indicators - Hidden on desktop */}
+								<div className="absolute left-6 z-30 flex flex-col items-center space-y-3 top-1/2 translate-y-8 lg:hidden">
+									<div
+										className={`transition-all duration-200 ${
+											swipeDirection === 'down'
+												? 'scale-110 text-black'
+												: 'text-gray-400'
+										}`}
+									>
+										<svg
+											className="w-5 h-5"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
 										>
-											<svg
-												className="w-5 h-5"
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={2.5}
-													d="M5 15l7-7 7 7"
-												/>
-											</svg>
-										</button>
-										<div className="text-xs text-gray-400 font-medium tracking-wider lg:hidden">
-											SWIPE
-										</div>
-										<button
-											type="button"
-											onClick={() =>
-												navigateToFlatIndex(getCurrentFlatIndex + 1)
-											}
-											className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 hover:bg-gray-100 ${
-												swipeDirection === 'up'
-													? 'scale-110 text-black'
-													: 'text-gray-400 hover:text-black'
-											}`}
-											aria-label="Next insight"
-										>
-											<svg
-												className="w-5 h-5"
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={2.5}
-													d="M19 9l-7 7-7-7"
-												/>
-											</svg>
-										</button>
+											<path
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												strokeWidth={2.5}
+												d="M5 15l7-7 7 7"
+											/>
+										</svg>
 									</div>
+									<div className="text-xs text-gray-400 font-medium tracking-wider">
+										SWIPE
+									</div>
+									<div
+										className={`transition-all duration-200 ${
+											swipeDirection === 'up'
+												? 'scale-110 text-black'
+												: 'text-gray-400'
+										}`}
+									>
+										<svg
+											className="w-5 h-5"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												strokeWidth={2.5}
+												d="M19 9l-7 7-7-7"
+											/>
+										</svg>
+									</div>
+								</div>
 
-									{/* Navigation Progress Bar */}
-									<div className="flex flex-col items-center">
-										<div className="h-48 w-1 bg-gray-200 rounded-full relative transition-all duration-150 lg:h-32">
-											{/* Progress fill */}
-											<div
-												className="rounded-full w-full transition-all duration-300 ease-out bg-black"
-												style={{
-													height: `${getVideoProgress}%`,
-													transition: 'height 0.3s ease-out',
-												}}
-											/>
-											{/* Current position indicator */}
-											<div
-												className="absolute w-3 h-3 rounded-full -left-1 transform -translate-y-1/2 transition-all duration-150 bg-black"
-												style={{
-													top: `${getVideoProgress}%`,
-												}}
-											/>
-										</div>
-										<div className="text-xs font-medium mt-3 transition-colors duration-150 tracking-wider text-gray-400">
-											{Math.round(getVideoProgress)}%
-										</div>
+								{/* Navigation Progress Bar */}
+								<div className="absolute right-6 z-30 flex flex-col items-center top-1/2 translate-y-8 lg:right-4 lg:top-4 lg:translate-y-0">
+									<div className="h-48 w-1 bg-gray-200 rounded-full relative transition-all duration-150 lg:h-32">
+										{/* Progress fill */}
+										<div
+											className="rounded-full w-full transition-all duration-300 ease-out bg-black"
+											style={{
+												height: `${getVideoProgress}%`,
+												transition: 'height 0.3s ease-out',
+											}}
+										/>
+										{/* Current position indicator */}
+										<div
+											className="absolute w-3 h-3 rounded-full -left-1 transform -translate-y-1/2 transition-all duration-150 bg-black"
+											style={{
+												top: `${getVideoProgress}%`,
+											}}
+										/>
+									</div>
+									<div className="text-xs font-medium mt-3 transition-colors duration-150 tracking-wider text-gray-400">
+										{Math.round(getVideoProgress)}%
 									</div>
 								</div>
 
@@ -946,11 +933,7 @@ export default function Home() {
 	const selectInsight = (sectionIndex: number, itemIndex?: number) => {
 		setSelectedSectionIndex(sectionIndex);
 		setCurrentSectionIndex(sectionIndex);
-
-		// Only go to individual view on mobile/tablet, stay in insights-list on desktop
-		if (window.innerWidth < 1024) {
-			setViewMode('individual');
-		}
+		setViewMode('individual');
 
 		// Only jump to video if this insight is not already playing
 		const activeContent = getCurrentActiveContent;
