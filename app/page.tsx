@@ -12,13 +12,16 @@ interface YouTubePlayer {
 declare global {
 	interface Window {
 		YT: {
-			Player: new (elementId: string, options: {
-				videoId: string;
-				events: {
-					onReady: () => void;
-					onError: () => void;
-				};
-			}) => YouTubePlayer;
+			Player: new (
+				elementId: string,
+				options: {
+					videoId: string;
+					events: {
+						onReady: () => void;
+						onError: () => void;
+					};
+				}
+			) => YouTubePlayer;
 		};
 		onYouTubeIframeAPIReady: () => void;
 	}
@@ -164,9 +167,7 @@ export default function Home() {
 		}
 	};
 
-	const processOutline = async (
-		currentSegments: TranscriptSegment[]
-	) => {
+	const processOutline = async (currentSegments: TranscriptSegment[]) => {
 		if (!currentSegments?.length) return;
 		setOutlineLoading(true);
 
@@ -237,30 +238,37 @@ export default function Home() {
 
 	const generateImage = async () => {
 		if (!contentRef.current || !outline) return;
-		
+
 		setGenerating(true);
-		
+
 		try {
 			const canvas = document.createElement('canvas');
 			const ctx = canvas.getContext('2d');
 			if (!ctx) throw new Error('Canvas context not available');
-			
+
 			canvas.width = 800;
-			
+
 			ctx.fillStyle = '#ffffff';
 			ctx.fillStyle = '#000000';
 			ctx.textAlign = 'left';
-			
+
 			let y = 60;
 			const padding = 40;
-			const maxWidth = canvas.width - (padding * 2);
-			
-			const wrapText = (text: string, maxWidth: number, fontSize: number = 16, isBold: boolean = false) => {
-				ctx.font = `${isBold ? 'bold' : 'normal'} ${fontSize}px system-ui, -apple-system, sans-serif`;
+			const maxWidth = canvas.width - padding * 2;
+
+			const wrapText = (
+				text: string,
+				maxWidth: number,
+				fontSize: number = 16,
+				isBold: boolean = false
+			) => {
+				ctx.font = `${
+					isBold ? 'bold' : 'normal'
+				} ${fontSize}px system-ui, -apple-system, sans-serif`;
 				const words = text.split(' ');
 				const lines: string[] = [];
 				let currentLine = '';
-				
+
 				for (const word of words) {
 					const testLine = currentLine + (currentLine ? ' ' : '') + word;
 					const metrics = ctx.measureText(testLine);
@@ -274,85 +282,78 @@ export default function Home() {
 				if (currentLine) lines.push(currentLine);
 				return lines;
 			};
-			
-			const titleLines = wrapText(videoTitle || 'Video Analysis', maxWidth, 24, true);
+
+			const titleLines = wrapText(
+				videoTitle || 'Video Analysis',
+				maxWidth,
+				24,
+				true
+			);
 			y += titleLines.length * 30 + 20;
-			
+
 			if (outline.hookQuote) {
 				const quoteLines = wrapText(`"${outline.hookQuote}"`, maxWidth, 18);
 				y += quoteLines.length * 25 + 50;
 			}
-			
+
 			outline.items.forEach((item) => {
 				const titleLines = wrapText(item.title, maxWidth, 18, true);
 				y += titleLines.length * 25;
-				
+
 				if (item.directQuote) {
 					const quoteLines = wrapText(`"${item.directQuote}"`, maxWidth, 16);
 					y += quoteLines.length * 22 + 10;
 				}
 				y += 20;
 			});
-			
+
 			canvas.height = y + 40;
-			
+
 			ctx.fillStyle = '#ffffff';
 			ctx.fillRect(0, 0, canvas.width, canvas.height);
 			ctx.fillStyle = '#000000';
 			ctx.textAlign = 'left';
-			
+
 			y = 60;
-			
-			const titleLines2 = wrapText(videoTitle || 'Video Analysis', maxWidth, 24, true);
+
+			const titleLines2 = wrapText(
+				videoTitle || 'Video Analysis',
+				maxWidth,
+				24,
+				true
+			);
 			ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
-			titleLines2.forEach(line => {
+			titleLines2.forEach((line) => {
 				ctx.fillText(line, padding, y);
 				y += 30;
 			});
-			
+
 			y += 20;
-			
-			if (outline.hookQuote) {
-				ctx.font = 'italic 18px system-ui, -apple-system, sans-serif';
-				const quoteLines = wrapText(`"${outline.hookQuote}"`, maxWidth, 18);
-				quoteLines.forEach(line => {
-					ctx.fillText(line, padding, y);
-					y += 25;
-				});
-				y += 20;
-				
-				ctx.font = '20px system-ui, -apple-system, sans-serif';
-				ctx.textAlign = 'center';
-				ctx.fillText('—', canvas.width / 2, y);
-				ctx.textAlign = 'left';
-				y += 30;
-			}
-			
+
 			outline.items.forEach((item) => {
 				const titleLines = wrapText(item.title, maxWidth, 18, true);
 				ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
-				titleLines.forEach(line => {
+				titleLines.forEach((line) => {
 					ctx.fillText(line, padding, y);
 					y += 25;
 				});
-				
+
 				if (item.directQuote) {
 					y += 10;
 					const quoteLines = wrapText(`"${item.directQuote}"`, maxWidth, 16);
 					ctx.font = 'italic 16px system-ui, -apple-system, sans-serif';
-					quoteLines.forEach(line => {
+					quoteLines.forEach((line) => {
 						ctx.fillText(line, padding, y);
 						y += 22;
 					});
 				}
 				y += 20;
 			});
-			
+
 			const link = document.createElement('a');
 			link.download = `${videoTitle || 'video-analysis'}.png`;
 			link.href = canvas.toDataURL();
 			link.click();
-			
 		} catch (error) {
 			console.error('Failed to generate image:', error);
 			setError('Failed to generate image');
@@ -463,13 +464,6 @@ export default function Home() {
 								</blockquote>
 							</div>
 						)}
-
-						{outline.hookQuote && outline.items?.length > 0 && (
-							<div className="text-center mb-6">
-								<span className="text-2xl text-black">—</span>
-							</div>
-						)}
-
 						{/* Principles and Quotes */}
 						{outline.items && outline.items.length > 0 && (
 							<div className="space-y-4">
