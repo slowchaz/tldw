@@ -89,7 +89,9 @@ export default function Home() {
 			if (!seconds || !playerReady || !playerRef.current) return;
 
 			try {
-				playerRef.current.seekTo(seconds, true);
+				// Go back 3-5 seconds to ensure we catch the beginning of the quote
+				const adjustedSeconds = Math.max(0, seconds - 4);
+				playerRef.current.seekTo(adjustedSeconds, true);
 				if (typeof playerRef.current.playVideo === 'function') {
 					playerRef.current.playVideo();
 				}
@@ -344,42 +346,6 @@ export default function Home() {
 										{item.directQuote && (
 											<blockquote
 												className="text-base italic text-black leading-relaxed cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
-												onClick={() => jumpTo(item.start)}
-												title={`Click to jump to ${formatSeconds(item.start)}`}
-											>
-												"{item.directQuote}"
-											</blockquote>
-										)}
-									</div>
-								))}
-							</div>
-						)}
-
-						{/* Separator */}
-						{outline.hookQuote && outline.items?.length > 0 && (
-							<div className="text-center">
-								<span className="text-2xl text-black">—</span>
-							</div>
-						)}
-
-						{/* Principles and Quotes */}
-						{outline.items && outline.items.length > 0 && (
-							<div className="space-y-12">
-								{outline.items.map((item, index) => (
-									<div key={index} className="space-y-4">
-										{/* Principle Title */}
-										<h2
-											className="text-xl font-bold text-black cursor-pointer hover:bg-gray-50 px-4 py-2 rounded transition-colors"
-											onClick={() => jumpTo(item.start)}
-											title={`Click to jump to ${formatSeconds(item.start)}`}
-										>
-											{item.title}
-										</h2>
-
-										{/* Supporting Quote */}
-										{item.directQuote && (
-											<blockquote
-												className="text-base italic text-black leading-relaxed pl-4 cursor-pointer hover:bg-gray-50 px-4 py-2 rounded transition-colors"
 												onClick={() => jumpTo(item.start)}
 												title={`Click to jump to ${formatSeconds(item.start)}`}
 											>
