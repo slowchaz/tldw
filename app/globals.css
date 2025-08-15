@@ -1,6 +1,34 @@
 @import 'tailwindcss';
 
 body {
-	font-family: system-ui, -apple-system, sans-serif;
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+		'Helvetica Neue', Arial, sans-serif;
 	line-height: 1.6;
+	color: #000;
+}
+
+/* Document-specific typography */
+.document-title {
+	font-family: Arial, Helvetica, sans-serif;
+	font-weight: 700;
+	letter-spacing: -0.025em;
+}
+
+.document-subtitle {
+	font-family: Arial, Helvetica, sans-serif;
+	font-weight: 400;
+	letter-spacing: -0.01em;
+}
+
+.document-heading {
+	font-family: Arial, Helvetica, sans-serif;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+}
+
+.document-quote {
+	font-family: Arial, Helvetica, sans-serif;
+	font-style: italic;
+	font-weight: 400;
+	letter-spacing: -0.01em;
 }

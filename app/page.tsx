@@ -128,7 +128,9 @@ export default function Home() {
 			if (data.success) {
 				if (Array.isArray(data.segments)) {
 					setSegments(data.segments);
-					setTranscript(data.segments.map((s: TranscriptSegment) => s.text).join('\n'));
+					setTranscript(
+						data.segments.map((s: TranscriptSegment) => s.text).join('\n')
+					);
 					void processOutline(data.segments, data.videoId || parsedId);
 				}
 				if (data.videoId) setVideoId(data.videoId);
@@ -238,9 +240,11 @@ export default function Home() {
 				<div className="max-w-md w-full px-6">
 					<div className="text-center mb-8">
 						<h1 className="text-3xl font-bold text-gray-900 mb-2">TLDW</h1>
-						<p className="text-gray-600">Turn long videos into digestible clips</p>
+						<p className="text-gray-600">
+							Turn long videos into digestible clips
+						</p>
 					</div>
-					
+
 					<div className="space-y-4">
 						<input
 							type="text"
@@ -250,7 +254,7 @@ export default function Home() {
 							className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 							disabled={loading}
 						/>
-						
+
 						<button
 							onClick={extractTranscript}
 							disabled={loading}
@@ -281,13 +285,10 @@ export default function Home() {
 				</div>
 			</div>
 
-			{/* Content */}
-			<div className="max-w-2xl mx-auto px-6 py-8">
-				{/* Header */}
-				<div className="text-center mb-8">
-					<h1 className="text-2xl font-bold text-gray-900 mb-2">
-						{videoTitle || 'Video Analysis'}
-					</h1>
+			{/* Document Content */}
+			<div className="max-w-4xl mx-auto px-8 py-8">
+				{/* Header Controls */}
+				<div className="text-center mb-6">
 					<div className="flex items-center justify-center space-x-4 text-sm text-gray-500">
 						{outlineLoading && <span>Processing...</span>}
 						<button onClick={reset} className="text-blue-600 hover:underline">
@@ -296,53 +297,99 @@ export default function Home() {
 					</div>
 				</div>
 
-				{/* Hook Quote */}
-				{outline?.hookQuote && (
-					<div className="mb-8">
-						<button
-							onClick={() => jumpTo(outline.hookQuoteTimestamp)}
-							className="block w-full text-left hover:bg-gray-50 p-4 rounded-lg transition-colors"
-						>
-							<blockquote className="text-lg italic text-gray-800 mb-2">
-								"{outline.hookQuote}"
-							</blockquote>
-							<div className="text-sm text-gray-500">
-								{formatSeconds(outline.hookQuoteTimestamp)}
-							</div>
-						</button>
-					</div>
-				)}
+				{/* Document Layout */}
+				{outline && (
+					<div className="bg-white max-w-3xl mx-auto">
+						{/* Main Title */}
+						<h1 className="text-3xl font-bold text-black mb-6 text-left leading-tight">
+							{videoTitle || 'Video Analysis'}
+						</h1>
 
-				{/* Divider */}
-				{outline?.hookQuote && outline?.items?.length > 0 && (
-					<div className="text-center mb-8">
-						<span className="text-2xl text-gray-400">—</span>
-					</div>
-				)}
-
-				{/* Insights */}
-				{outline?.items && outline.items.length > 0 && (
-					<div className="space-y-6">
-						{outline.items.map((item, index) => (
-							<div key={index} className="border-b border-gray-100 pb-6 last:border-b-0">
-								<button
-									onClick={() => jumpTo(item.start)}
-									className="block w-full text-left hover:bg-gray-50 p-4 rounded-lg transition-colors"
+						{/* Hook Quote */}
+						{outline.hookQuote && (
+							<div className="mb-6">
+								<blockquote
+									className="text-lg italic text-black leading-relaxed cursor-pointer hover:bg-gray-50 p-3 rounded transition-colors"
+									onClick={() => jumpTo(outline.hookQuoteTimestamp)}
+									title={`Click to jump to ${formatSeconds(
+										outline.hookQuoteTimestamp
+									)}`}
 								>
-									<h3 className="text-xl font-bold text-gray-900 mb-3">
-										{item.title}
-									</h3>
-									{item.directQuote && (
-										<blockquote className="text-gray-700 italic mb-2">
-											"{item.directQuote}"
-										</blockquote>
-									)}
-									<div className="text-sm text-gray-500">
-										{formatSeconds(item.start)}
-									</div>
-								</button>
+									"{outline.hookQuote}"
+								</blockquote>
 							</div>
-						))}
+						)}
+
+						{outline.hookQuote && outline.items?.length > 0 && (
+							<div className="text-center mb-6">
+								<span className="text-2xl text-black">—</span>
+							</div>
+						)}
+
+						{/* Principles and Quotes */}
+						{outline.items && outline.items.length > 0 && (
+							<div className="space-y-4">
+								{outline.items.map((item, index) => (
+									<div key={index} className="mb-4">
+										{/* Principle Title */}
+										<h3
+											className="text-lg font-bold text-black cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors leading-tight"
+											onClick={() => jumpTo(item.start)}
+											title={`Click to jump to ${formatSeconds(item.start)}`}
+										>
+											{item.title}
+										</h3>
+
+										{/* Supporting Quote */}
+										{item.directQuote && (
+											<blockquote
+												className="text-base italic text-black leading-relaxed cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors"
+												onClick={() => jumpTo(item.start)}
+												title={`Click to jump to ${formatSeconds(item.start)}`}
+											>
+												"{item.directQuote}"
+											</blockquote>
+										)}
+									</div>
+								))}
+							</div>
+						)}
+
+						{/* Separator */}
+						{outline.hookQuote && outline.items?.length > 0 && (
+							<div className="text-center">
+								<span className="text-2xl text-black">—</span>
+							</div>
+						)}
+
+						{/* Principles and Quotes */}
+						{outline.items && outline.items.length > 0 && (
+							<div className="space-y-12">
+								{outline.items.map((item, index) => (
+									<div key={index} className="space-y-4">
+										{/* Principle Title */}
+										<h2
+											className="text-xl font-bold text-black cursor-pointer hover:bg-gray-50 px-4 py-2 rounded transition-colors"
+											onClick={() => jumpTo(item.start)}
+											title={`Click to jump to ${formatSeconds(item.start)}`}
+										>
+											{item.title}
+										</h2>
+
+										{/* Supporting Quote */}
+										{item.directQuote && (
+											<blockquote
+												className="text-base italic text-black leading-relaxed pl-4 cursor-pointer hover:bg-gray-50 px-4 py-2 rounded transition-colors"
+												onClick={() => jumpTo(item.start)}
+												title={`Click to jump to ${formatSeconds(item.start)}`}
+											>
+												"{item.directQuote}"
+											</blockquote>
+										)}
+									</div>
+								))}
+							</div>
+						)}
 					</div>
 				)}
 
