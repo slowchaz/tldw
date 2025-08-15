@@ -2,9 +2,24 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+interface YouTubePlayer {
+	cueVideoById: (videoId: string) => void;
+	seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+	playVideo: () => void;
+	destroy: () => void;
+}
+
 declare global {
 	interface Window {
-		YT: any;
+		YT: {
+			Player: new (elementId: string, options: {
+				videoId: string;
+				events: {
+					onReady: () => void;
+					onError: () => void;
+				};
+			}) => YouTubePlayer;
+		};
 		onYouTubeIframeAPIReady: () => void;
 	}
 }
@@ -61,9 +76,11 @@ export default function Home() {
 	const [, setSegments] = useState<TranscriptSegment[]>([]);
 	const [outline, setOutline] = useState<OutlineResponse | null>(null);
 	const [outlineLoading, setOutlineLoading] = useState(false);
+	const [generating, setGenerating] = useState(false);
 
-	const playerRef = useRef<any | null>(null);
+	const playerRef = useRef<YouTubePlayer | null>(null);
 	const [playerReady, setPlayerReady] = useState(false);
+	const contentRef = useRef<HTMLDivElement | null>(null);
 
 	const ensureYouTubeIframeAPI = () => {
 		if (typeof window === 'undefined') return Promise.resolve();
@@ -133,7 +150,7 @@ export default function Home() {
 					setTranscript(
 						data.segments.map((s: TranscriptSegment) => s.text).join('\n')
 					);
-					void processOutline(data.segments, data.videoId || parsedId);
+					void processOutline(data.segments);
 				}
 				if (data.videoId) setVideoId(data.videoId);
 				if (data.videoTitle) setVideoTitle(data.videoTitle);
@@ -148,8 +165,7 @@ export default function Home() {
 	};
 
 	const processOutline = async (
-		currentSegments: TranscriptSegment[],
-		_currentVideoId?: string
+		currentSegments: TranscriptSegment[]
 	) => {
 		if (!currentSegments?.length) return;
 		setOutlineLoading(true);
@@ -217,6 +233,132 @@ export default function Home() {
 		return hrs > 0
 			? `${hrs}:${two(mins)}:${two(secs)}`
 			: `${mins}:${two(secs)}`;
+	};
+
+	const generateImage = async () => {
+		if (!contentRef.current || !outline) return;
+		
+		setGenerating(true);
+		
+		try {
+			const canvas = document.createElement('canvas');
+			const ctx = canvas.getContext('2d');
+			if (!ctx) throw new Error('Canvas context not available');
+			
+			canvas.width = 800;
+			
+			ctx.fillStyle = '#ffffff';
+			ctx.fillStyle = '#000000';
+			ctx.textAlign = 'left';
+			
+			let y = 60;
+			const padding = 40;
+			const maxWidth = canvas.width - (padding * 2);
+			
+			const wrapText = (text: string, maxWidth: number, fontSize: number = 16, isBold: boolean = false) => {
+				ctx.font = `${isBold ? 'bold' : 'normal'} ${fontSize}px system-ui, -apple-system, sans-serif`;
+				const words = text.split(' ');
+				const lines: string[] = [];
+				let currentLine = '';
+				
+				for (const word of words) {
+					const testLine = currentLine + (currentLine ? ' ' : '') + word;
+					const metrics = ctx.measureText(testLine);
+					if (metrics.width > maxWidth && currentLine) {
+						lines.push(currentLine);
+						currentLine = word;
+					} else {
+						currentLine = testLine;
+					}
+				}
+				if (currentLine) lines.push(currentLine);
+				return lines;
+			};
+			
+			const titleLines = wrapText(videoTitle || 'Video Analysis', maxWidth, 24, true);
+			y += titleLines.length * 30 + 20;
+			
+			if (outline.hookQuote) {
+				const quoteLines = wrapText(`"${outline.hookQuote}"`, maxWidth, 18);
+				y += quoteLines.length * 25 + 50;
+			}
+			
+			outline.items.forEach((item) => {
+				const titleLines = wrapText(item.title, maxWidth, 18, true);
+				y += titleLines.length * 25;
+				
+				if (item.directQuote) {
+					const quoteLines = wrapText(`"${item.directQuote}"`, maxWidth, 16);
+					y += quoteLines.length * 22 + 10;
+				}
+				y += 20;
+			});
+			
+			canvas.height = y + 40;
+			
+			ctx.fillStyle = '#ffffff';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			ctx.fillStyle = '#000000';
+			ctx.textAlign = 'left';
+			
+			y = 60;
+			
+			const titleLines2 = wrapText(videoTitle || 'Video Analysis', maxWidth, 24, true);
+			ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
+			titleLines2.forEach(line => {
+				ctx.fillText(line, padding, y);
+				y += 30;
+			});
+			
+			y += 20;
+			
+			if (outline.hookQuote) {
+				ctx.font = 'italic 18px system-ui, -apple-system, sans-serif';
+				const quoteLines = wrapText(`"${outline.hookQuote}"`, maxWidth, 18);
+				quoteLines.forEach(line => {
+					ctx.fillText(line, padding, y);
+					y += 25;
+				});
+				y += 20;
+				
+				ctx.font = '20px system-ui, -apple-system, sans-serif';
+				ctx.textAlign = 'center';
+				ctx.fillText('—', canvas.width / 2, y);
+				ctx.textAlign = 'left';
+				y += 30;
+			}
+			
+			outline.items.forEach((item) => {
+				const titleLines = wrapText(item.title, maxWidth, 18, true);
+				ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
+				titleLines.forEach(line => {
+					ctx.fillText(line, padding, y);
+					y += 25;
+				});
+				
+				if (item.directQuote) {
+					y += 10;
+					const quoteLines = wrapText(`"${item.directQuote}"`, maxWidth, 16);
+					ctx.font = 'italic 16px system-ui, -apple-system, sans-serif';
+					quoteLines.forEach(line => {
+						ctx.fillText(line, padding, y);
+						y += 22;
+					});
+				}
+				y += 20;
+			});
+			
+			const link = document.createElement('a');
+			link.download = `${videoTitle || 'video-analysis'}.png`;
+			link.href = canvas.toDataURL();
+			link.click();
+			
+		} catch (error) {
+			console.error('Failed to generate image:', error);
+			setError('Failed to generate image');
+		} finally {
+			setGenerating(false);
+		}
 	};
 
 	const reset = () => {
@@ -301,7 +443,7 @@ export default function Home() {
 
 				{/* Document Layout */}
 				{outline && (
-					<div className="bg-white max-w-3xl mx-auto">
+					<div ref={contentRef} className="bg-white max-w-3xl mx-auto">
 						{/* Main Title */}
 						<h1 className="text-3xl font-bold text-black mb-6 text-left leading-tight">
 							{videoTitle || 'Video Analysis'}
@@ -317,7 +459,7 @@ export default function Home() {
 										outline.hookQuoteTimestamp
 									)}`}
 								>
-									"{outline.hookQuote}"
+									&ldquo;{outline.hookQuote}&rdquo;
 								</blockquote>
 							</div>
 						)}
@@ -349,7 +491,7 @@ export default function Home() {
 												onClick={() => jumpTo(item.start)}
 												title={`Click to jump to ${formatSeconds(item.start)}`}
 											>
-												"{item.directQuote}"
+												&ldquo;{item.directQuote}&rdquo;
 											</blockquote>
 										)}
 									</div>
@@ -362,6 +504,19 @@ export default function Home() {
 				{!outline && !outlineLoading && (
 					<div className="text-center text-gray-500">
 						<p>No insights extracted yet.</p>
+					</div>
+				)}
+
+				{/* Generate Image Button */}
+				{outline && (
+					<div className="text-center mt-8">
+						<button
+							onClick={generateImage}
+							disabled={generating}
+							className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+						>
+							{generating ? 'Generating...' : 'Generate Image'}
+						</button>
 					</div>
 				)}
 			</div>
