@@ -15,6 +15,12 @@ type TranscriptSegment = {
 	text: string;
 };
 
+type Chapter = {
+	start_time: number; // seconds
+	end_time?: number; // seconds
+	title: string;
+};
+
 function timeStringToSeconds(timeString: string): number {
 	// Expected VTT timestamp: HH:MM:SS.mmm (hours are required in VTT)
 	const match = timeString
@@ -157,21 +163,27 @@ export async function POST(request: NextRequest) {
 				? '/app/cookies/youtube.txt'
 				: './cookies/youtube.txt';
 
-		// First get video title
+		// First get video title and chapters
 		let videoTitle = 'Unknown Video';
+		let chapters: Chapter[] = [];
 		try {
 			const infoCommand = `yt-dlp --dump-json --no-warnings --cookies "${cookiesPath}" "${youtubeUrl}"`;
-			console.log('Getting video info for title...');
+			console.log('Getting video info for title and chapters...');
 			const infoResult = await execAsync(infoCommand, {
 				timeout: 15000,
 				maxBuffer: 1024 * 1024,
 			});
 			const videoInfo = JSON.parse(infoResult.stdout);
 			videoTitle = videoInfo.title || 'Unknown Video';
+			chapters = videoInfo.chapters || [];
 			console.log('Video title:', videoTitle);
+			console.log('Found chapters:', chapters.length);
+			if (chapters.length > 0) {
+				console.log('Chapter titles:', chapters.map((c) => c.title).join(', '));
+			}
 		} catch (titleError) {
-			console.warn('Could not fetch video title:', titleError);
-			// Continue without title
+			console.warn('Could not fetch video title and chapters:', titleError);
+			// Continue without title and chapters
 		}
 
 		const command = `yt-dlp \
@@ -220,6 +232,7 @@ export async function POST(request: NextRequest) {
 				videoId,
 				videoTitle,
 				segments,
+				chapters,
 				extractedWith: 'yt-dlp',
 			});
 		} catch (execError: unknown) {

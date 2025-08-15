@@ -11,152 +11,117 @@ type TranscriptSegment = {
 	text: string;
 };
 
+type Chapter = {
+	start_time: number; // seconds
+	end_time?: number; // seconds
+	title: string;
+};
+
 type OutlineItem = {
 	title: string;
 	start: number;
 	end?: number;
-	summary?: string;
-};
-
-type OutlineSection = {
-	title: string;
-	start: number;
-	end?: number;
-	items: OutlineItem[];
+	directQuote: string;
 };
 
 type OutlineResponse = {
-	sections: OutlineSection[];
+	hookQuote: string;
+	hookQuoteTimestamp: number;
+	items: OutlineItem[];
 };
 
-function buildInsightsPrompt(segments: TranscriptSegment[]): string {
-	// Keep payload size reasonable. If too many segments, sample evenly across the entire video
-	const MAX_SEGMENTS = 600; // conservative to avoid oversized requests
+// Token estimation functions
+function estimateTokens(text: string): number {
+	// Rough estimation: ~4 characters per token for English text
+	return Math.ceil(text.length / 4);
+}
+
+function estimateSegmentTokens(segments: TranscriptSegment[]): number {
+	const json = JSON.stringify(segments);
+	return estimateTokens(json);
+}
+
+function prepareSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+	// For backwards compatibility with smaller transcripts
+	const totalTokens = estimateSegmentTokens(segments);
+	const MAX_TOKENS = 45000; // Conservative limit
+
+	if (totalTokens <= MAX_TOKENS) {
+		return segments; // No chunking needed
+	}
+
+	// For large transcripts, this function is now used only for single-chunk processing
+	// The main chunking logic is handled by createChunks()
+	const MAX_SEGMENTS = 600;
 	let selected: TranscriptSegment[] = segments;
 	if (segments.length > MAX_SEGMENTS) {
 		const total = segments.length;
 		const picks: TranscriptSegment[] = [];
-		// Evenly spaced indices including first and last
 		for (let i = 0; i < MAX_SEGMENTS; i++) {
 			const idx = Math.round((i * (total - 1)) / (MAX_SEGMENTS - 1));
 			picks.push(segments[idx]);
 		}
 		selected = picks;
 	}
+	return selected;
+}
 
-	// Calculate video duration for the prompt
-	const videoDuration =
-		selected.length > 0 ? Math.max(...selected.map((s) => s.end)) : 0;
-	const durationMinutes = Math.round(videoDuration / 60);
+// Hook Quote Hunter function
+function buildHookQuotePrompt(segments: TranscriptSegment[]): string {
+	const instruction = `You are a Hook Quote Hunter. Your job is to find THE perfect hook quote from this video transcript - the one quote that will stop people scrolling and make them want to read the entire write-up.
 
-	const instruction = `You are given a timestamped transcript from a ${durationMinutes}-minute video.
-Extract the most insightful, quotable statements that people would want to share and discuss.
+WHAT MAKES A GREAT HOOK QUOTE:
+- Counterintuitive or surprising ("Creativity is not an ability that you either have or do not have")
+- Challenges common assumptions
+- Contains wisdom that feels fresh or unexpected
+- Makes people think "Wait, what? Tell me more..."
+- Captures the essence/thesis of the entire talk
+- Stands alone as a complete thought
+- 1-2 sentences maximum
 
-CRITICAL: Coverage must span the full ${durationMinutes}-minute video duration. Do not stop at early timestamps.
+EXAMPLES OF GREAT HOOKS:
+- "Creativity is not an ability that you either have or do not have. It's absolutely unrelated to IQ, provided you are intelligent above a certain minimal level."
+- "The most successful people I know are also the most bored people I know."
+- "Your competition isn't other people. Your competition is your distractions."
 
-Your goal: Identify the key insights and memorable statements that capture the essence of what makes this content worth watching.
+YOUR TASK:
+1. Read through the entire transcript
+2. Look for moments where the speaker says something surprising, counterintuitive, or profound
+3. Find quotes that capture the core message/thesis
+4. Clean up any transcription errors while keeping the exact meaning
+5. Select the ONE best hook quote
 
-Requirements:
-- Return only strict JSON matching this TypeScript type (no extra text):
-  { "sections": Array<{ "title": string; "start": number; "end": number }> }
-- 4-10 key insights distributed across the FULL video duration (0 to ~${videoDuration} seconds).
-- CRITICAL: NO OVERLAPPING TIMESTAMPS. Each section must have distinct time ranges that don't overlap.
-- Sections should be in chronological order with clear gaps between them.
-- Section titles should be insightful, quotable statements that capture the core message (e.g., "Success is a system, not a goal", "The compound effect of small decisions", "Why expertise alone isn't enough")
-- Focus on actionable insights, profound realizations, counter-intuitive truths, and memorable frameworks
-- Use clear, direct language that feels authentic and substantive
-- Each section should represent a coherent segment where this insight is discussed
-- ENSURE coverage spans the entire video timeline with NO timestamp overlaps.
-`;
-
-	console.log(
-		`Building outline for ${durationMinutes}-minute video with ${selected.length} segments (${segments.length} original)`
-	);
-	console.log(
-		`Segment time range: ${selected[0]?.start || 0}s - ${
-			selected[selected.length - 1]?.end || 0
-		}s`
-	);
+OUTPUT FORMAT:
+Return only the hook quote in quotation marks, nothing else.`;
 
 	return `${instruction}\nTRANSCRIPT_SEGMENTS_JSON = ${JSON.stringify(
-		selected
+		segments
 	)}`;
 }
 
-function buildContextPrompt(
-	segments: TranscriptSegment[],
-	insight: { title: string; start: number; end: number }
-): string {
-	// Filter segments to the relevant time range for this insight
-	const relevantSegments = segments.filter(
-		(s) => s.start >= insight.start && s.end <= insight.end
-	);
-
-	const instruction = `You are given a timestamped transcript segment and a main insight statement.
-Generate supporting context items that explain and provide evidence for this insight.
-
-INSIGHT: "${insight.title}"
-TIME RANGE: ${insight.start}s - ${insight.end}s
-
-Your goal: Create 3-8 supporting items that break down and explain this main insight using specific content from the transcript.
-
-Requirements:
-- Return only strict JSON matching this TypeScript type (no extra text):
-  { "items": Array<{ "title": string; "start": number; "end"?: number; "summary": string }> }
-- Items should have non-overlapping timestamps within the ${insight.start}s - ${insight.end}s range
-- Item titles should be concise explanations that break down the main concept (e.g., "Daily habits matter more than motivation", "Small consistent actions compound over time")
-- Summaries should provide specific context from the transcript that supports the main insight
-- Keep summaries concise and easily digestible
-- Items should be in chronological order within the time range
-- Focus on concrete examples, evidence, or explanations that make the main insight more understandable
-`;
-
-	return `${instruction}\nTRANSCRIPT_SEGMENTS_JSON = ${JSON.stringify(
-		relevantSegments
-	)}`;
-}
-
-function safeParseInsights(
-	content: string
-): { sections: Array<{ title: string; start: number; end: number }> } | null {
+function parseHookQuote(content: string): string | null {
 	try {
-		const parsed = JSON.parse(content);
-		if (parsed && Array.isArray(parsed.sections)) return parsed;
-	} catch {}
-	// Try to extract outermost JSON object if the model added extra text
-	const start = content.indexOf('{');
-	const end = content.lastIndexOf('}');
-	if (start !== -1 && end !== -1 && end > start) {
-		try {
-			const parsed = JSON.parse(content.slice(start, end + 1));
-			if (parsed && Array.isArray(parsed.sections)) return parsed;
-		} catch {}
+		// Look for the hook quote (should be the only quoted text in the response)
+		const hookMatch = content.match(/"([^"]+)"/);
+		if (!hookMatch) return null;
+
+		return hookMatch[1].trim();
+	} catch (error) {
+		console.error('Error parsing hook quote:', error);
+		return null;
 	}
-	return null;
 }
 
-function safeParseContext(content: string): { items: OutlineItem[] } | null {
-	try {
-		const parsed = JSON.parse(content);
-		if (parsed && Array.isArray(parsed.items)) return parsed;
-	} catch {}
-	// Try to extract outermost JSON object if the model added extra text
-	const start = content.indexOf('{');
-	const end = content.lastIndexOf('}');
-	if (start !== -1 && end !== -1 && end > start) {
-		try {
-			const parsed = JSON.parse(content.slice(start, end + 1));
-			if (parsed && Array.isArray(parsed.items)) return parsed;
-		} catch {}
-	}
-	return null;
-}
+
 
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
 		const segments: TranscriptSegment[] = Array.isArray(body?.segments)
 			? body.segments
+			: [];
+		const chapters: Chapter[] = Array.isArray(body?.chapters)
+			? body.chapters
 			: [];
 
 		if (!segments.length) {
@@ -177,68 +142,59 @@ export async function POST(request: NextRequest) {
 		const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 		const anthropic = new Anthropic({ apiKey: apiKey });
 
-		// Step 1: Generate main insights
-		const insightsPrompt = buildInsightsPrompt(segments);
-		const insightsResponse = await anthropic.messages.create({
+		// Use Hook Quote Hunter approach
+		console.log('Using Hook Quote Hunter approach');
+
+		// Prepare segments (sample if too large)
+		const selectedSegments = prepareSegments(segments);
+
+		// Single hook quote extraction call
+		const hookQuotePrompt = buildHookQuotePrompt(selectedSegments);
+
+		const hookQuoteResponse = await anthropic.messages.create({
 			model: model,
 			max_tokens: 3000,
 			temperature: 1,
+			thinking: {
+				type: "enabled",
+				budget_tokens: 2000
+			},
 			system:
-				'You are an expert at extracting the most valuable, quotable insights from content. Generate clear, insightful titles that people would want to share and discuss. Focus on substance over sensationalism. Always return strict JSON only. No prose. No markdown.',
+				'You are a Hook Quote Hunter. Analyze the transcript carefully and return only the best hook quote in quotation marks.',
 			messages: [
 				{
 					role: 'user',
-					content: insightsPrompt,
+					content: hookQuotePrompt,
 				},
 			],
 		});
 
-		const insightsContent: string =
-			insightsResponse.content[0]?.type === 'text'
-				? insightsResponse.content[0].text
-				: '';
-		const insights = safeParseInsights(insightsContent);
-		if (!insights || !insights.sections?.length) {
+		console.log('Hook quote response:', JSON.stringify(hookQuoteResponse, null, 2));
+		
+		// Handle thinking response - the actual response might be in a different content block
+		let hookQuoteContent: string = '';
+		for (const content of hookQuoteResponse.content) {
+			if (content.type === 'text') {
+				hookQuoteContent = content.text;
+				break;
+			}
+		}
+		
+		console.log('Hook quote content:', hookQuoteContent);
+
+		// Parse the hook quote
+		const hookQuote = parseHookQuote(hookQuoteContent);
+		if (!hookQuote) {
 			return NextResponse.json(
-				{ error: 'Failed to parse insights response' },
+				{ error: 'Failed to parse hook quote response' },
 				{ status: 500 }
 			);
 		}
 
-		// Step 2: Generate context for each insight
-		const sectionsWithItems: OutlineSection[] = [];
-		for (const insight of insights.sections) {
-			const contextPrompt = buildContextPrompt(segments, insight);
-			const contextResponse = await anthropic.messages.create({
-				model: model,
-				max_tokens: 2000,
-				temperature: 1,
-				system:
-					'You are an expert at providing clear, digestible context that explains insights. Generate supporting items that break down and explain the main concept using specific examples from the content. Always return strict JSON only. No prose. No markdown.',
-				messages: [
-					{
-						role: 'user',
-						content: contextPrompt,
-					},
-				],
-			});
-
-			const contextContent: string =
-				contextResponse.content[0]?.type === 'text'
-					? contextResponse.content[0].text
-					: '';
-			const context = safeParseContext(contextContent);
-
-			sectionsWithItems.push({
-				title: insight.title,
-				start: insight.start,
-				end: insight.end,
-				items: context?.items || [],
-			});
-		}
-
 		const finalOutline: OutlineResponse = {
-			sections: sectionsWithItems,
+			hookQuote: hookQuote,
+			hookQuoteTimestamp: 0,
+			items: [], // Will be populated by future prompts
 		};
 
 		return NextResponse.json({ success: true, outline: finalOutline });

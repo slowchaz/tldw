@@ -17,22 +17,23 @@ type TranscriptSegment = {
 	text: string;
 };
 
+type Chapter = {
+	start_time: number;
+	end_time?: number;
+	title: string;
+};
+
 type OutlineItem = {
 	title: string;
 	start: number;
 	end?: number;
-	summary?: string;
-};
-
-type OutlineSection = {
-	title: string;
-	start: number;
-	end?: number;
-	items: OutlineItem[];
+	directQuote: string;
 };
 
 type OutlineResponse = {
-	sections: OutlineSection[];
+	hookQuote: string;
+	hookQuoteTimestamp: number;
+	items: OutlineItem[];
 };
 
 function getYouTubeVideoId(input: string): string | null {
@@ -116,20 +117,42 @@ function ContentView({
 			{/* Title Selection View */}
 			{viewMode === 'titles' && (
 				<div className="h-full">
-					{outline?.sections?.length ? (
+					{outline?.items?.length ? (
 						<div className="h-full flex flex-col">
 							<div className="bg-black text-white py-8 px-8 text-center lg:py-6 flex-shrink-0">
 								<h2 className="text-2xl font-bold text-white tracking-tight lg:text-xl">
 									{videoTitle || 'CHOOSE A TOPIC'}
 								</h2>
 							</div>
+							{/* Hook Quote Section */}
+							{outline?.hookQuote && (
+								<div className="bg-gray-50 px-8 py-8 border-b border-gray-200 lg:px-6 lg:py-6">
+									<div className="max-w-3xl mx-auto lg:max-w-none text-center">
+										<button
+											type="button"
+											onClick={() => jumpTo(outline.hookQuoteTimestamp)}
+											className="group w-full hover:bg-gray-100 rounded-lg p-6 transition-all duration-200"
+										>
+											<div className="text-xs font-medium tracking-wider uppercase text-gray-500 mb-3">
+												Hook Quote
+											</div>
+											<blockquote className="text-lg font-medium text-gray-800 italic leading-relaxed lg:text-base">
+												"{outline.hookQuote}"
+											</blockquote>
+											<div className="text-xs font-medium tracking-wider uppercase text-gray-400 mt-3">
+												{formatSeconds(outline.hookQuoteTimestamp)}
+											</div>
+										</button>
+									</div>
+								</div>
+							)}
 							<div className="flex-1 overflow-y-auto">
 								<div className="max-w-3xl mx-auto lg:max-w-none">
-									{outline.sections.map((section: any, index: number) => (
+									{outline.items.map((item: any, index: number) => (
 										<div key={index}>
 											<div
 												className={`group transition-all duration-200 ${
-													getCurrentActiveContent.sectionIndex === index
+													getCurrentActiveContent.itemIndex === index
 														? 'bg-black text-white accent-highlight active'
 														: 'hover:bg-gray-50 accent-highlight'
 												}`}
@@ -143,7 +166,7 @@ function ContentView({
 														<div className="flex items-start gap-6 lg:gap-4">
 															<span
 																className={`text-2xl font-medium min-w-[3rem] transition-colors lg:text-xl lg:min-w-[2.5rem] ${
-																	getCurrentActiveContent.sectionIndex === index
+																	getCurrentActiveContent.itemIndex === index
 																		? 'text-white'
 																		: 'text-gray-400'
 																}`}
@@ -153,42 +176,43 @@ function ContentView({
 															<div className="flex-1 min-w-0">
 																<h3
 																	className={`text-xl font-bold mb-3 leading-tight tracking-tight lg:text-lg lg:mb-2 ${
-																		getCurrentActiveContent.sectionIndex ===
-																		index
+																		getCurrentActiveContent.itemIndex === index
 																			? 'text-white'
 																			: 'text-black'
 																	}`}
 																>
-																	{section.title}
+																	{item.title}
 																</h3>
-																<div className="flex items-center justify-between">
+																<div className="flex items-center justify-between mb-3 lg:mb-2">
 																	<span
 																		className={`text-xs font-medium tracking-wider uppercase ${
-																			getCurrentActiveContent.sectionIndex ===
+																			getCurrentActiveContent.itemIndex ===
 																			index
 																				? 'text-gray-300'
 																				: 'text-gray-500'
 																		}`}
 																	>
-																		{formatRange(section.start, section.end)}
-																	</span>
-																	<span
-																		className={`text-xs font-medium tracking-wider uppercase ${
-																			getCurrentActiveContent.sectionIndex ===
-																			index
-																				? 'text-gray-300'
-																				: 'text-gray-500'
-																		}`}
-																	>
-																		{section.items?.length || 0} Insights
+																		{formatRange(item.start, item.end)}
 																	</span>
 																</div>
+																{item.directQuote && (
+																	<p
+																		className={`text-sm leading-relaxed font-normal italic ${
+																			getCurrentActiveContent.itemIndex ===
+																			index
+																				? 'text-gray-300'
+																				: 'text-gray-600'
+																		}`}
+																	>
+																		"{item.directQuote}"
+																	</p>
+																)}
 															</div>
 														</div>
 													</button>
 												</div>
 											</div>
-											{index < outline.sections.length - 1 && (
+											{index < outline.items.length - 1 && (
 												<div className="border-b border-gray-200 lg:border-gray-300"></div>
 											)}
 										</div>
@@ -206,148 +230,17 @@ function ContentView({
 				</div>
 			)}
 
-			{/* Insights List View */}
-			{viewMode === 'insights-list' &&
-				selectedSectionIndex !== null &&
-				outline?.sections?.[selectedSectionIndex] && (
-					<div className="h-full">
-						{(() => {
-							const section = outline.sections[selectedSectionIndex];
-							return (
-								<div className="h-full flex flex-col">
-									<div className="bg-black text-white py-8 px-8 text-center lg:py-6 flex-shrink-0">
-										<h2 className="text-2xl font-bold text-white tracking-tight lg:text-xl">
-											{section.title}
-										</h2>
-									</div>
-									<div className="flex-1 overflow-y-auto">
-										<div className="max-w-3xl mx-auto lg:max-w-none">
-											{section.items?.length ? (
-												section.items.map((item: any, index: number) => (
-													<div key={index}>
-														<div
-															className={`group transition-all duration-200 ${
-																getCurrentActiveContent.sectionIndex ===
-																	selectedSectionIndex &&
-																getCurrentActiveContent.itemIndex === index
-																	? 'bg-black text-white accent-highlight active'
-																	: 'hover:bg-gray-50 accent-highlight'
-															}`}
-														>
-															<div className="px-8 lg:px-6">
-																<button
-																	type="button"
-																	onClick={() =>
-																		selectInsight(selectedSectionIndex, index)
-																	}
-																	className="w-full text-left py-8 lg:py-6"
-																>
-																	<div className="flex items-start gap-6 lg:gap-4">
-																		<span
-																			className={`text-2xl font-medium min-w-[3rem] transition-colors lg:text-xl lg:min-w-[2.5rem] ${
-																				getCurrentActiveContent.sectionIndex ===
-																					selectedSectionIndex &&
-																				getCurrentActiveContent.itemIndex ===
-																					index
-																					? 'text-white'
-																					: 'text-gray-400'
-																			}`}
-																		>
-																			{String(index + 1).padStart(2, '0')}.
-																		</span>
-																		<div className="flex-1 min-w-0">
-																			<h3
-																				className={`text-xl font-bold mb-3 leading-tight tracking-tight lg:text-lg lg:mb-2 ${
-																					getCurrentActiveContent.sectionIndex ===
-																						selectedSectionIndex &&
-																					getCurrentActiveContent.itemIndex ===
-																						index
-																						? 'text-white'
-																						: 'text-black'
-																				}`}
-																			>
-																				{item.title}
-																			</h3>
-																			<div className="flex items-center justify-between mb-3 lg:mb-2">
-																				<span
-																					className={`text-xs font-medium tracking-wider uppercase ${
-																						getCurrentActiveContent.sectionIndex ===
-																							selectedSectionIndex &&
-																						getCurrentActiveContent.itemIndex ===
-																							index
-																							? 'text-gray-300'
-																							: 'text-gray-500'
-																					}`}
-																				>
-																					{formatRange(item.start, item.end)}
-																				</span>
-																			</div>
-																			{item.summary && (
-																				<p
-																					className={`text-sm leading-relaxed font-normal ${
-																						getCurrentActiveContent.sectionIndex ===
-																							selectedSectionIndex &&
-																						getCurrentActiveContent.itemIndex ===
-																							index
-																							? 'text-gray-300'
-																							: 'text-gray-600'
-																					}`}
-																				>
-																					{item.summary}
-																				</p>
-																			)}
-																		</div>
-																	</div>
-																</button>
-															</div>
-														</div>
-														{index < section.items.length - 1 && (
-															<div className="border-b border-gray-200 lg:border-gray-300"></div>
-														)}
-													</div>
-												))
-											) : (
-												<div className="h-full flex items-center justify-center">
-													<p className="text-gray-400 font-medium tracking-wider uppercase text-sm">
-														No insights available for this topic.
-													</p>
-												</div>
-											)}
-										</div>
-									</div>
-								</div>
-							);
-						})()}
-					</div>
-				)}
-
 			{/* Individual Insight View - Mobile/Tablet Only */}
-			{viewMode === 'individual' && outline?.sections?.length && (
+			{viewMode === 'individual' && outline?.items?.length && (
 				<div className="h-full relative overflow-hidden">
 					{(() => {
 						const activeContent = getCurrentActiveContent;
 
-						// Always show content from the currently playing section
-						const currentlyPlayingSection =
-							outline.sections[activeContent.sectionIndex];
-						let currentItem = null;
-						let currentSectionTitle = '';
-
-						if (currentlyPlayingSection) {
-							currentSectionTitle = currentlyPlayingSection.title;
-
-							// If there's a specific item playing, show it
-							if (
-								activeContent.itemIndex >= 0 &&
-								currentlyPlayingSection.items?.[activeContent.itemIndex]
-							) {
-								currentItem =
-									currentlyPlayingSection.items[activeContent.itemIndex];
-							} else if (currentlyPlayingSection.items?.length) {
-								// Otherwise show the first item of the current section
-								currentItem = currentlyPlayingSection.items[0];
-							}
-						}
+						// Get the currently playing item from the flat items array
+						const currentItem =
+							outline.items[activeContent.itemIndex] ||
+							outline.items[0] ||
+							null;
 
 						return (
 							<div className="h-full flex flex-col relative">
@@ -440,7 +333,7 @@ function ContentView({
 								{/* Fixed Title at Top */}
 								<div className="bg-black text-white py-8 px-8 relative z-20 lg:py-6 flex-shrink-0">
 									<h2 className="text-2xl font-bold leading-tight text-center tracking-tight lg:text-xl">
-										{currentSectionTitle}
+										{currentItem?.title || videoTitle || 'Insights'}
 									</h2>
 								</div>
 
@@ -481,9 +374,7 @@ function ContentView({
 
 															// Check if the displayed item is the currently playing item
 															const isCurrentlyPlaying =
-																currentlyPlayingSection?.items?.[
-																	currentItemIndex
-																] === currentItem;
+																outline.items[currentItemIndex] === currentItem;
 
 															if (!isCurrentlyPlaying && currentItem?.start) {
 																jumpTo(currentItem.start);
@@ -503,10 +394,10 @@ function ContentView({
 																	)}
 																</span>
 															</div>
-															{currentItem.summary && (
-																<p className="leading-relaxed text-center text-lg text-gray-700 font-normal max-w-2xl mx-auto lg:text-base lg:leading-relaxed">
-																	{currentItem.summary}
-																</p>
+															{currentItem.directQuote && (
+																<blockquote className="leading-relaxed text-center text-lg text-gray-700 font-normal max-w-2xl mx-auto lg:text-base lg:leading-relaxed italic border-l-4 border-gray-300 pl-6">
+																	"{currentItem.directQuote}"
+																</blockquote>
 															)}
 														</div>
 													</button>
@@ -538,20 +429,15 @@ export default function Home() {
 	const [videoId, setVideoId] = useState<string>('');
 	const [videoTitle, setVideoTitle] = useState<string>('');
 	const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+	const [chapters, setChapters] = useState<Chapter[]>([]);
 	const [outline, setOutline] = useState<OutlineResponse | null>(null);
 	const [outlineLoading, setOutlineLoading] = useState(false);
 	const [fromCache, setFromCache] = useState({
 		transcript: false,
 		outline: false,
 	});
-	const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
 	const [currentVideoTime, setCurrentVideoTime] = useState(0);
-	const [viewMode, setViewMode] = useState<
-		'titles' | 'insights-list' | 'individual'
-	>('titles');
-	const [selectedSectionIndex, setSelectedSectionIndex] = useState<
-		number | null
-	>(null);
+	const [viewMode, setViewMode] = useState<'titles' | 'individual'>('titles');
 	const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(
 		null
 	);
@@ -582,7 +468,11 @@ export default function Home() {
 
 	const setCachedTranscript = (
 		videoId: string,
-		data: { segments: TranscriptSegment[]; videoTitle?: string }
+		data: {
+			segments: TranscriptSegment[];
+			videoTitle?: string;
+			chapters?: Chapter[];
+		}
 	) => {
 		try {
 			localStorage.setItem(`transcript_${videoId}`, JSON.stringify(data));
@@ -665,6 +555,7 @@ export default function Home() {
 		setError('');
 		setTranscript('');
 		setSegments([]);
+		setChapters([]);
 		setOutline(null);
 		setVideoTitle('');
 		setFromCache({ transcript: false, outline: false });
@@ -685,10 +576,17 @@ export default function Home() {
 				if (cachedTranscript.videoTitle) {
 					setVideoTitle(cachedTranscript.videoTitle);
 				}
+				if (cachedTranscript.chapters) {
+					setChapters(cachedTranscript.chapters);
+				}
 				setFromCache((prev) => ({ ...prev, transcript: true }));
 				setLoading(false);
 				// Process outline (which will also check cache)
-				void processOutline(cachedTranscript.segments, parsedId);
+				void processOutline(
+					cachedTranscript.segments,
+					parsedId,
+					cachedTranscript.chapters
+				);
 				return;
 			}
 		}
@@ -709,9 +607,11 @@ export default function Home() {
 					const transcriptData = {
 						segments: data.segments as TranscriptSegment[],
 						videoTitle: data.videoTitle,
+						chapters: (data.chapters as Chapter[]) || [],
 					};
 					setSegments(transcriptData.segments);
 					setTranscript(transcriptData.segments.map((s) => s.text).join('\n'));
+					setChapters(transcriptData.chapters);
 
 					// Cache the transcript data
 					if (data.videoId || parsedId) {
@@ -721,7 +621,8 @@ export default function Home() {
 					// Kick off processing to outline with the received segments
 					void processOutline(
 						transcriptData.segments,
-						data.videoId || parsedId
+						data.videoId || parsedId,
+						transcriptData.chapters
 					);
 				}
 				if (data.videoId) {
@@ -742,7 +643,8 @@ export default function Home() {
 
 	const processOutline = async (
 		currentSegments: TranscriptSegment[],
-		currentVideoId?: string
+		currentVideoId?: string,
+		currentChapters: Chapter[] = []
 	) => {
 		if (!currentSegments?.length) return;
 		setOutlineLoading(true);
@@ -751,7 +653,7 @@ export default function Home() {
 		const videoIdToUse = currentVideoId || videoId;
 		if (videoIdToUse) {
 			const cachedOutline = getCachedOutline(videoIdToUse);
-			if (cachedOutline && Array.isArray(cachedOutline.sections)) {
+			if (cachedOutline && Array.isArray(cachedOutline.items)) {
 				console.log('Loading outline from cache for video:', videoIdToUse);
 				setOutline(cachedOutline);
 				setFromCache((prev) => ({ ...prev, outline: true }));
@@ -764,10 +666,13 @@ export default function Home() {
 			const res = await fetch('/api/process-transcript', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ segments: currentSegments }),
+				body: JSON.stringify({
+					segments: currentSegments,
+					chapters: currentChapters,
+				}),
 			});
 			const data = await res.json();
-			if (data?.success && data?.outline?.sections) {
+			if (data?.success && data?.outline?.items) {
 				const outlineData = data.outline as OutlineResponse;
 				setOutline(outlineData);
 
@@ -913,67 +818,27 @@ export default function Home() {
 		}
 	};
 
-	const navigateToSection = (index: number) => {
-		if (!outline?.sections?.length) return;
-
-		const newIndex = Math.max(0, Math.min(index, outline.sections.length - 1));
-		setCurrentSectionIndex(newIndex);
-
-		// Auto-jump to the section's timestamp
-		const section = outline.sections[newIndex];
-		if (section?.start) {
-			jumpTo(section.start);
-		}
-	};
-
-	const selectTitle = (sectionIndex: number) => {
-		setSelectedSectionIndex(sectionIndex);
-		setCurrentSectionIndex(sectionIndex);
-		setViewMode('insights-list');
-
-		// Only jump to video if this section is not already playing
-		const activeContent = getCurrentActiveContent;
-		const isAlreadyPlaying = activeContent.sectionIndex === sectionIndex;
-
-		if (!isAlreadyPlaying) {
-			const section = outline?.sections?.[sectionIndex];
-			if (section?.start) {
-				jumpTo(section.start);
-			}
-		}
-	};
-
-	const selectInsight = (sectionIndex: number, itemIndex?: number) => {
-		setSelectedSectionIndex(sectionIndex);
-		setCurrentSectionIndex(sectionIndex);
-
-		// Only go to individual view on mobile/tablet, stay in insights-list on desktop
+	const selectTitle = (itemIndex: number) => {
+		// Go to individual view on mobile/tablet, stay in titles on desktop
 		if (window.innerWidth < 1024) {
 			setViewMode('individual');
 		}
 
-		// Only jump to video if this insight is not already playing
+		// Only jump to video if this item is not already playing
 		const activeContent = getCurrentActiveContent;
-		const isAlreadyPlaying =
-			activeContent.sectionIndex === sectionIndex &&
-			(itemIndex === undefined || activeContent.itemIndex === itemIndex);
+		const isAlreadyPlaying = activeContent.itemIndex === itemIndex;
 
 		if (!isAlreadyPlaying) {
-			// Jump to specific item or section start
-			const section = outline?.sections?.[sectionIndex];
-			const item = itemIndex !== undefined ? section?.items?.[itemIndex] : null;
-			const startTime = item?.start || section?.start;
-			if (startTime) {
-				jumpTo(startTime);
+			const item = outline?.items?.[itemIndex];
+			if (item?.start) {
+				jumpTo(item.start);
 			}
 		}
 	};
 
 	// Reset states when outline changes
 	useEffect(() => {
-		setCurrentSectionIndex(0);
 		setViewMode('titles');
-		setSelectedSectionIndex(null);
 		// Clear any pending jumps when outline changes
 		pendingJumpRef.current = null;
 	}, [outline]);
@@ -986,156 +851,63 @@ export default function Home() {
 		}
 	}, [viewMode]);
 
-	// Get current active section and item based on video time
+	// Get current active item based on video time
 	const getCurrentActiveContent = useMemo(() => {
-		if (!outline?.sections?.length) {
-			return { sectionIndex: 0, itemIndex: -1 };
+		if (!outline?.items?.length) {
+			return { itemIndex: 0 };
 		}
 
-		// If no video time yet, return first section
+		// If no video time yet, return first item
 		if (!currentVideoTime) {
-			return { sectionIndex: 0, itemIndex: -1 };
+			return { itemIndex: 0 };
 		}
 
-		// Find the section that contains the current time
-		for (let i = 0; i < outline.sections.length; i++) {
-			const section = outline.sections[i];
-			const nextSection = outline.sections[i + 1];
+		// Find the item that contains the current time
+		for (let i = 0; i < outline.items.length; i++) {
+			const item = outline.items[i];
+			const nextItem = outline.items[i + 1];
 
-			// Check if current time is within this section
-			const inSection =
-				currentVideoTime >= section.start - 1 && // Add 1 second buffer before
-				(!nextSection || currentVideoTime < nextSection.start);
+			// Check if current time is within this item
+			const inItem =
+				currentVideoTime >= item.start - 1 && // Add 1 second buffer before
+				(!nextItem || currentVideoTime < nextItem.start);
 
-			if (inSection) {
-				// Find active item within this section
-				let activeItemIndex = -1;
-				if (section.items?.length) {
-					for (let j = 0; j < section.items.length; j++) {
-						const item = section.items[j];
-						const nextItem = section.items[j + 1];
-
-						if (
-							currentVideoTime >= item.start - 1 && // Add 1 second buffer before
-							(!nextItem || currentVideoTime < nextItem.start)
-						) {
-							activeItemIndex = j;
-							break;
-						}
-					}
-				}
-
-				return { sectionIndex: i, itemIndex: activeItemIndex };
+			if (inItem) {
+				return { itemIndex: i };
 			}
 		}
 
-		// If we're beyond all sections, return the last section
-		const lastSectionIndex = outline.sections.length - 1;
-		return { sectionIndex: lastSectionIndex, itemIndex: -1 };
+		// If we're beyond all items, return the last item
+		const lastItemIndex = outline.items.length - 1;
+		return { itemIndex: lastItemIndex };
 	}, [outline, currentVideoTime]);
 
-	// Flattened navigation system
+	// Navigation system - now simply works with the flat items array
 	const createFlatNavigation = useMemo(() => {
-		if (!outline?.sections?.length) return [];
-
-		const flatItems: Array<{
-			type: 'section' | 'item';
-			sectionIndex: number;
-			itemIndex?: number;
-			title: string;
-			start: number;
-			end?: number;
-			summary?: string;
-		}> = [];
-
-		outline.sections.forEach((section, sectionIndex) => {
-			// Add the main section
-			flatItems.push({
-				type: 'section',
-				sectionIndex,
-				title: section.title,
-				start: section.start,
-				end: section.end,
-			});
-
-			// Add all sub-items for this section
-			if (section.items?.length) {
-				section.items.forEach((item, itemIndex) => {
-					flatItems.push({
-						type: 'item',
-						sectionIndex,
-						itemIndex,
-						title: item.title,
-						start: item.start,
-						end: item.end,
-						summary: item.summary,
-					});
-				});
-			}
-		});
-
-		return flatItems;
+		if (!outline?.items?.length) return [];
+		return outline.items;
 	}, [outline]);
 
 	// Get current flat navigation index
 	const getCurrentFlatIndex = useMemo(() => {
-		if (!createFlatNavigation.length) return 0;
-
 		const activeContent = getCurrentActiveContent;
-
-		// Find the matching item in flat navigation
-		for (let i = 0; i < createFlatNavigation.length; i++) {
-			const flatItem = createFlatNavigation[i];
-
-			if (
-				flatItem.type === 'section' &&
-				flatItem.sectionIndex === activeContent.sectionIndex
-			) {
-				// If we're in a section but no specific item is active, return the section
-				if (activeContent.itemIndex < 0) {
-					return i;
-				}
-			} else if (
-				flatItem.type === 'item' &&
-				flatItem.sectionIndex === activeContent.sectionIndex &&
-				flatItem.itemIndex === activeContent.itemIndex
-			) {
-				// Return the specific sub-item
-				return i;
-			}
-		}
-
-		return 0;
-	}, [createFlatNavigation, getCurrentActiveContent]);
+		return activeContent.itemIndex;
+	}, [getCurrentActiveContent]);
 
 	// Navigate to flat index
 	const navigateToFlatIndex = (index: number) => {
-		if (!createFlatNavigation.length) return;
+		if (!outline?.items?.length) return;
 
-		const clampedIndex = Math.max(
-			0,
-			Math.min(index, createFlatNavigation.length - 1)
-		);
-		const targetItem = createFlatNavigation[clampedIndex];
+		const clampedIndex = Math.max(0, Math.min(index, outline.items.length - 1));
+		const targetItem = outline.items[clampedIndex];
 
 		if (!targetItem) return;
-
-		// Update section index
-		setCurrentSectionIndex(targetItem.sectionIndex);
 
 		// Jump to the timestamp
 		if (targetItem.start) {
 			jumpTo(targetItem.start);
 		}
 	};
-
-	// Update current section based on video time
-	useEffect(() => {
-		const { sectionIndex } = getCurrentActiveContent;
-		setCurrentSectionIndex((prevIndex) => {
-			return sectionIndex !== prevIndex ? sectionIndex : prevIndex;
-		});
-	}, [getCurrentActiveContent]);
 
 	// Handle pending jumps when player becomes ready
 	useEffect(() => {
@@ -1288,13 +1060,7 @@ export default function Home() {
 									{/* Precise back button - only show when not in title selection */}
 									{viewMode !== 'titles' && (
 										<button
-											onClick={() => {
-												if (viewMode === 'individual') {
-													setViewMode('insights-list');
-												} else {
-													setViewMode('titles');
-												}
-											}}
+											onClick={() => setViewMode('titles')}
 											className="flex items-center justify-center w-8 h-8 text-white hover:text-gray-300 transition-all duration-150 hover:bg-white/10 rounded-full"
 											aria-label="Back"
 										>
@@ -1337,6 +1103,7 @@ export default function Home() {
 										onClick={() => {
 											setTranscript('');
 											setSegments([]);
+											setChapters([]);
 											setOutline(null);
 											setVideoId('');
 											setVideoTitle('');
@@ -1344,8 +1111,6 @@ export default function Home() {
 											setError('');
 											setFromCache({ transcript: false, outline: false });
 											setViewMode('titles');
-											setSelectedSectionIndex(null);
-											setCurrentSectionIndex(0);
 											if (playerRef.current) {
 												try {
 													playerRef.current.destroy();
@@ -1370,13 +1135,8 @@ export default function Home() {
 							videoTitle={videoTitle}
 							viewMode={viewMode}
 							setViewMode={setViewMode}
-							selectedSectionIndex={selectedSectionIndex}
-							setSelectedSectionIndex={setSelectedSectionIndex}
-							currentSectionIndex={currentSectionIndex}
-							setCurrentSectionIndex={setCurrentSectionIndex}
 							getCurrentActiveContent={getCurrentActiveContent}
 							selectTitle={selectTitle}
-							selectInsight={selectInsight}
 							formatRange={formatRange}
 							segments={segments}
 							currentVideoTime={currentVideoTime}
