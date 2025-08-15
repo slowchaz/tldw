@@ -219,6 +219,7 @@ For each principle provided:
 3. Clean up any transcription errors while preserving the exact meaning
 4. Ensure the quote is concise but complete
 5. Note the exact timestamp where this quote occurs
+6. Consider the natural flow and progression of ideas as they appear chronologically in the video
 
 PRINCIPLES TO MATCH:
 ${principlesList}
@@ -476,7 +477,7 @@ export async function POST(request: NextRequest) {
 		const supportingQuotesItems = parseSupportingQuotes(supportingQuotesContent);
 		
 		// If parsing fails, fall back to principles without quotes
-		const finalItems = supportingQuotesItems.length > 0 
+		let finalItems = supportingQuotesItems.length > 0 
 			? supportingQuotesItems.map(item => ({
 				title: item.title,
 				start: item.timestamp,
@@ -489,6 +490,11 @@ export async function POST(request: NextRequest) {
 				end: 0,
 				directQuote: '', // Fallback if quote matching fails
 			}));
+
+		// Sort items chronologically by timestamp
+		console.log('Items before sorting:', finalItems.map(item => ({ title: item.title, start: item.start })));
+		finalItems = finalItems.sort((a, b) => a.start - b.start);
+		console.log('Items after sorting:', finalItems.map(item => ({ title: item.title, start: item.start })));
 
 		const finalOutline: OutlineResponse = {
 			hookQuote: hookQuoteResult.quote,

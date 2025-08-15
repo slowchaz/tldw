@@ -696,14 +696,17 @@ export default function Home() {
 		(seconds: number) => {
 			if (!seconds) return;
 
+			// Add a 3-second buffer before the quote to provide context
+			const adjustedSeconds = Math.max(0, seconds - 3);
+
 			// If player is not ready, store the pending jump
 			if (!playerReady || !playerRef.current) {
-				pendingJumpRef.current = seconds;
+				pendingJumpRef.current = adjustedSeconds;
 				return;
 			}
 
 			try {
-				playerRef.current.seekTo(seconds, true);
+				playerRef.current.seekTo(adjustedSeconds, true);
 				if (typeof playerRef.current.playVideo === 'function') {
 					playerRef.current.playVideo();
 				}
@@ -711,7 +714,7 @@ export default function Home() {
 				pendingJumpRef.current = null;
 			} catch {
 				// Store as pending jump if API call fails
-				pendingJumpRef.current = seconds;
+				pendingJumpRef.current = adjustedSeconds;
 			}
 		},
 		[playerReady]
