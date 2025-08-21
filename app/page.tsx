@@ -80,6 +80,7 @@ export default function Home() {
 	const [outline, setOutline] = useState<OutlineResponse | null>(null);
 	const [outlineLoading, setOutlineLoading] = useState(false);
 	const [generating, setGenerating] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 
 	const playerRef = useRef<YouTubePlayer | null>(null);
 	const [playerReady, setPlayerReady] = useState(false);
@@ -153,7 +154,8 @@ export default function Home() {
 					setTranscript(
 						data.segments.map((s: TranscriptSegment) => s.text).join('\n')
 					);
-					void processOutline(data.segments);
+					// Pass the videoId directly to processOutline instead of relying on state
+					void processOutline(data.segments, data.videoId);
 				}
 				if (data.videoId) setVideoId(data.videoId);
 				if (data.videoTitle) setVideoTitle(data.videoTitle);
@@ -167,15 +169,21 @@ export default function Home() {
 		}
 	};
 
-	const processOutline = async (currentSegments: TranscriptSegment[]) => {
+	const processOutline = async (currentSegments: TranscriptSegment[], currentVideoId?: string) => {
 		if (!currentSegments?.length) return;
 		setOutlineLoading(true);
+
+		// Use the passed videoId or fallback to state videoId
+		const idToUse = currentVideoId || videoId;
 
 		try {
 			const res = await fetch('/api/process-transcript', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ segments: currentSegments }),
+				body: JSON.stringify({ 
+					segments: currentSegments,
+					videoId: idToUse 
+				}),
 			});
 			const data = await res.json();
 			if (data?.success && data?.outline?.items) {
@@ -362,6 +370,37 @@ export default function Home() {
 		}
 	};
 
+	const deleteCache = async () => {
+		if (!videoId) {
+			setError('No video loaded to delete cache for');
+			return;
+		}
+
+		setDeleting(true);
+		setError('');
+
+		try {
+			const response = await fetch('/api/delete-cache', {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ videoId }),
+			});
+
+			const data = await response.json();
+
+			if (data.success) {
+				// Reset UI after successful deletion
+				reset();
+			} else {
+				setError(data.error || 'Failed to delete cache');
+			}
+		} catch {
+			setError('Network error: Failed to delete cache');
+		} finally {
+			setDeleting(false);
+		}
+	};
+
 	const reset = () => {
 		setTranscript('');
 		setSegments([]);
@@ -439,6 +478,15 @@ export default function Home() {
 						<button onClick={reset} className="text-blue-600 hover:underline">
 							New Video
 						</button>
+						{videoId && (
+							<button 
+								onClick={deleteCache} 
+								disabled={deleting}
+								className="text-red-600 hover:underline disabled:opacity-50"
+							>
+								{deleting ? 'Deleting...' : 'Delete Cache'}
+							</button>
+						)}
 					</div>
 				</div>
 

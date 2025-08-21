@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
+import { 
+	getVideoWithContent, 
+	saveVideo, 
+	saveTranscript
+} from '../../../lib/database';
 
 export const runtime = 'nodejs';
 
@@ -142,15 +147,49 @@ export async function POST(request: NextRequest) {
 		const { url } = await request.json();
 
 		if (!url) {
-			return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+			return NextResponse.json({ error: 'URL is required' }, { 
+				status: 400,
+				headers: {
+					'Cache-Control': 'no-cache, no-store, must-revalidate',
+					'Pragma': 'no-cache',
+					'Expires': '0'
+				}
+			});
 		}
 
 		const videoId = extractVideoId(url);
 		if (!videoId) {
 			return NextResponse.json(
 				{ error: 'Invalid YouTube URL or video ID' },
-				{ status: 400 }
+				{ 
+					status: 400,
+					headers: {
+						'Cache-Control': 'no-cache, no-store, must-revalidate',
+						'Pragma': 'no-cache',
+						'Expires': '0'
+					}
+				}
 			);
+		}
+
+		// Check if we already have this video's transcript in the database
+		const existingData = getVideoWithContent(videoId);
+		if (existingData.video && existingData.transcript) {
+			console.log('Found cached transcript for video:', videoId);
+			return NextResponse.json({
+				success: true,
+				videoId,
+				videoTitle: existingData.video.title,
+				segments: existingData.transcript.segments,
+				chapters: existingData.transcript.chapters || [],
+				extractedWith: 'cache',
+			}, {
+				headers: {
+					'Cache-Control': 'no-cache, no-store, must-revalidate',
+					'Pragma': 'no-cache',
+					'Expires': '0'
+				}
+			});
 		}
 
 		// Use yt-dlp to extract captions and video info
@@ -227,6 +266,27 @@ export async function POST(request: NextRequest) {
 				);
 			}
 
+			// Save video and transcript to database
+			try {
+				const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+				saveVideo({
+					videoId,
+					title: videoTitle,
+					url: youtubeUrl,
+				});
+
+				saveTranscript({
+					videoId,
+					segments,
+					chapters,
+				});
+
+				console.log('Saved video and transcript to database:', videoId);
+			} catch (dbError) {
+				console.error('Failed to save to database:', dbError);
+				// Continue without failing the request
+			}
+
 			return NextResponse.json({
 				success: true,
 				videoId,
@@ -234,6 +294,12 @@ export async function POST(request: NextRequest) {
 				segments,
 				chapters,
 				extractedWith: 'yt-dlp',
+			}, {
+				headers: {
+					'Cache-Control': 'no-cache, no-store, must-revalidate',
+					'Pragma': 'no-cache',
+					'Expires': '0'
+				}
 			});
 		} catch (execError: unknown) {
 			console.error('yt-dlp execution error for video:', videoId);
